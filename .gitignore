@@ -1,0 +1,13 @@
+# Credenciales y variables sensibles
+.env
+*.env
+
+# Entornos virtuales
+binance_env/
+venv/
+env/
+.venv/
+
+# Temporales y caché de Python
+__pycache__/
+*.py[cod]

@@ -1,0 +1,394 @@
+[
+    {
+        "symbol": "BNBUSDT",
+        "longAccount": "0.6980",
+        "longShortRatio": "2.3113",
+        "shortAccount": "0.3020",
+        "timestamp": 1791028800000
+    },
+    {
+        "symbol": "BNBUSDT",
+        "longAccount": "0.6752",
+        "longShortRatio": "2.0788",
+        "shortAccount": "0.3248",
+        "timestamp": 1791072000000
+    },
+    {
+        "symbol": "BNBUSDT",
+        "longAccount": "0.6825",
+        "longShortRatio": "2.1496",
+        "shortAccount": "0.3175",
+        "timestamp": 1791115200000
+    },
+    {
+        "symbol": "BNBUSDT",
+        "longAccount": "0.6841",
+        "longShortRatio": "2.1656",
+        "shortAccount": "0.3159",
+        "timestamp": 1791158400000
+    },
+    {
+        "symbol": "BNBUSDT",
+        "longAccount": "0.6855",
+        "longShortRatio": "2.1797",
+        "shortAccount": "0.3145",
+        "timestamp": 1791201600000
+    },
+    {
+        "symbol": "BNBUSDT",
+        "longAccount": "0.6871",
+        "longShortRatio": "2.1959",
+        "shortAccount": "0.3129",
+        "timestamp": 1791244800000
+    },
+    {
+        "symbol": "BNBUSDT",
+        "longAccount": "0.6922",
+        "longShortRatio": "2.2489",
+        "shortAccount": "0.3078",
+        "timestamp": 1791288000000
+    },
+    {
+        "symbol": "BNBUSDT",
+        "longAccount": "0.6874",
+        "longShortRatio": "2.1990",
+        "shortAccount": "0.3126",
+        "timestamp": 1791331200000
+    },
+    {
+        "symbol": "BNBUSDT",
+        "longAccount": "0.6955",
+        "longShortRatio": "2.2841",
+        "shortAccount": "0.3045",
+        "timestamp": 1791374400000
+    },
+    {
+        "symbol": "BNBUSDT",
+        "longAccount": "0.6980",
+        "longShortRatio": "2.3113",
+        "shortAccount": "0.3020",
+        "timestamp": 1791417600000
+    },
+    {
+        "symbol": "BNBUSDT",
+        "longAccount": "0.7032",
+        "longShortRatio": "2.3693",
+        "shortAccount": "0.2968",
+        "timestamp": 1791460800000
+    },
+    {
+        "symbol": "BNBUSDT",
+        "longAccount": "0.7192",
+        "longShortRatio": "2.5613",
+        "shortAccount": "0.2808",
+        "timestamp": 1791504000000
+    },
+    {
+        "symbol": "BNBUSDT",
+        "longAccount": "0.6940",
+        "longShortRatio": "2.2680",
+        "shortAccount": "0.3060",
+        "timestamp": 1791547200000
+    },
+    {
+        "symbol": "BNBUSDT",
+        "longAccount": "0.6908",
+        "longShortRatio": "2.2342",
+        "shortAccount": "0.3092",
+        "timestamp": 1791590400000
+    },
+    {
+        "symbol": "BNBUSDT",
+        "longAccount": "0.6847",
+        "longShortRatio": "2.1716",
+        "shortAccount": "0.3153",
+        "timestamp": 1791633600000
+    },
+    {
+        "symbol": "BNBUSDT",
+        "longAccount": "0.6870",
+        "longShortRatio": "2.1949",
+        "shortAccount": "0.3130",
+        "timestamp": 1791676800000
+    },
+    {
+        "symbol": "BNBUSDT",
+        "longAccount": "0.6829",
+        "longShortRatio": "2.1536",
+        "shortAccount": "0.3171",
+        "timestamp": 1791720000000
+    },
+    {
+        "symbol": "BNBUSDT",
+        "longAccount": "0.6897",
+        "longShortRatio": "2.2227",
+        "shortAccount": "0.3103",
+        "timestamp": 1791763200000
+    },
+    {
+        "symbol": "BNBUSDT",
+        "longAccount": "0.6778",
+        "longShortRatio": "2.1037",
+        "shortAccount": "0.3222",
+        "timestamp": 1791806400000
+    },
+    {
+        "symbol": "BNBUSDT",
+        "longAccount": "0.6779",
+        "longShortRatio": "2.1046",
+        "shortAccount": "0.3221",
+        "timestamp": 1791849600000
+    },
+    {
+        "symbol": "BNBUSDT",
+        "longAccount": "0.6763",
+        "longShortRatio": "2.0893",
+        "shortAccount": "0.3237",
+        "timestamp": 1791892800000
+    },
+    {
+        "symbol": "BNBUSDT",
+        "longAccount": "0.6951",
+        "longShortRatio": "2.2798",
+        "shortAccount": "0.3049",
+        "timestamp": 1791936000000
+    },
+    {
+        "symbol": "BNBUSDT",
+        "longAccount": "0.7069",
+        "longShortRatio": "2.4118",
+        "shortAccount": "0.2931",
+        "timestamp": 1791979200000
+    },
+    {
+        "symbol": "BNBUSDT",
+        "longAccount": "0.7209",
+        "longShortRatio": "2.5829",
+        "shortAccount": "0.2791",
+        "timestamp": 1792022400000
+    },
+    {
+        "symbol": "BNBUSDT",
+        "longAccount": "0.7218",
+        "longShortRatio": "2.5945",
+        "shortAccount": "0.2782",
+        "timestamp": 1792065600000
+    },
+    {
+        "symbol": "BNBUSDT",
+        "longAccount": "0.7168",
+        "longShortRatio": "2.5311",
+        "shortAccount": "0.2832",
+        "timestamp": 1792108800000
+    },
+    {
+        "symbol": "BNBUSDT",
+        "longAccount": "0.7110",
+        "longShortRatio": "2.4602",
+        "shortAccount": "0.2890",
+        "timestamp": 1792152000000
+    },
+    {
+        "symbol": "BNBUSDT",
+        "longAccount": "0.7143",
+        "longShortRatio": "2.5002",
+        "shortAccount": "0.2857",
+        "timestamp": 1792195200000
+    },
+    {
+        "symbol": "BNBUSDT",
+        "longAccount": "0.7127",
+        "longShortRatio": "2.4807",
+        "shortAccount": "0.2873",
+        "timestamp": 1792238400000
+    },
+    {
+        "symbol": "BNBUSDT",
+        "longAccount": "0.7186",
+        "longShortRatio": "2.5537",
+        "shortAccount": "0.2814",
+        "timestamp": 1792281600000
+    },
+    {
+        "symbol": "BNBUSDT",
+        "longAccount": "0.7221",
+        "longShortRatio": "2.5984",
+        "shortAccount": "0.2779",
+        "timestamp": 1792324800000
+    },
+    {
+        "symbol": "BNBUSDT",
+        "longAccount": "0.7358",
+        "longShortRatio": "2.7850",
+        "shortAccount": "0.2642",
+        "timestamp": 1792368000000
+    },
+    {
+        "symbol": "BNBUSDT",
+        "longAccount": "0.7198",
+        "longShortRatio": "2.5689",
+        "shortAccount": "0.2802",
+        "timestamp": 1792411200000
+    },
+    {
+        "symbol": "BNBUSDT",
+        "longAccount": "0.7134",
+        "longShortRatio": "2.4892",
+        "shortAccount": "0.2866",
+        "timestamp": 1792454400000
+    },
+    {
+        "symbol": "BNBUSDT",
+        "longAccount": "0.7272",
+        "longShortRatio": "2.6657",
+        "shortAccount": "0.2728",
+        "timestamp": 1792497600000
+    },
+    {
+        "symbol": "BNBUSDT",
+        "longAccount": "0.7071",
+        "longShortRatio": "2.4141",
+        "shortAccount": "0.2929",
+        "timestamp": 1792540800000
+    },
+    {
+        "symbol": "BNBUSDT",
+        "longAccount": "0.7069",
+        "longShortRatio": "2.4118",
+        "shortAccount": "0.2931",
+        "timestamp": 1792584000000
+    },
+    {
+        "symbol": "BNBUSDT",
+        "longAccount": "0.7068",
+        "longShortRatio": "2.4106",
+        "shortAccount": "0.2932",
+        "timestamp": 1792627200000
+    },
+    {
+        "symbol": "BNBUSDT",
+        "longAccount": "0.7229",
+        "longShortRatio": "2.6088",
+        "shortAccount": "0.2771",
+        "timestamp": 1792670400000
+    },
+    {
+        "symbol": "BNBUSDT",
+        "longAccount": "0.7352",
+        "longShortRatio": "2.7764",
+        "shortAccount": "0.2648",
+        "timestamp": 1792713600000
+    },
+    {
+        "symbol": "BNBUSDT",
+        "longAccount": "0.7107",
+        "longShortRatio": "2.4566",
+        "shortAccount": "0.2893",
+        "timestamp": 1792756800000
+    },
+    {
+        "symbol": "BNBUSDT",
+        "longAccount": "0.6895",
+        "longShortRatio": "2.2206",
+        "shortAccount": "0.3105",
+        "timestamp": 1792800000000
+    },
+    {
+        "symbol": "BNBUSDT",
+        "longAccount": "0.7144",
+        "longShortRatio": "2.5014",
+        "shortAccount": "0.2856",
+        "timestamp": 1792843200000
+    },
+    {
+        "symbol": "BNBUSDT",
+        "longAccount": "0.7437",
+        "longShortRatio": "2.9017",
+        "shortAccount": "0.2563",
+        "timestamp": 1792886400000
+    },
+    {
+        "symbol": "BNBUSDT",
+        "longAccount": "0.7010",
+        "longShortRatio": "2.3445",
+        "shortAccount": "0.2990",
+        "timestamp": 1792929600000
+    },
+    {
+        "symbol": "BNBUSDT",
+        "longAccount": "0.7047",
+        "longShortRatio": "2.3864",
+        "shortAccount": "0.2953",
+        "timestamp": 1792972800000
+    },
+    {
+        "symbol": "BNBUSDT",
+        "longAccount": "0.7224",
+        "longShortRatio": "2.6023",
+        "shortAccount": "0.2776",
+        "timestamp": 1793016000000
+    },
+    {
+        "symbol": "BNBUSDT",
+        "longAccount": "0.7205",
+        "longShortRatio": "2.5778",
+        "shortAccount": "0.2795",
+        "timestamp": 1793059200000
+    },
+    {
+        "symbol": "BNBUSDT",
+        "longAccount": "0.7242",
+        "longShortRatio": "2.6258",
+        "shortAccount": "0.2758",
+        "timestamp": 1793102400000
+    },
+    {
+        "symbol": "BNBUSDT",
+        "longAccount": "0.7159",
+        "longShortRatio": "2.5199",
+        "shortAccount": "0.2841",
+        "timestamp": 1793145600000
+    },
+    {
+        "symbol": "BNBUSDT",
+        "longAccount": "0.7005",
+        "longShortRatio": "2.3389",
+        "shortAccount": "0.2995",
+        "timestamp": 1793188800000
+    },
+    {
+        "symbol": "BNBUSDT",
+        "longAccount": "0.7216",
+        "longShortRatio": "2.5920",
+        "shortAccount": "0.2784",
+        "timestamp": 1793232000000
+    },
+    {
+        "symbol": "BNBUSDT",
+        "longAccount": "0.7285",
+        "longShortRatio": "2.6832",
+        "shortAccount": "0.2715",
+        "timestamp": 1793275200000
+    },
+    {
+        "symbol": "BNBUSDT",
+        "longAccount": "0.7514",
+        "longShortRatio": "3.0225",
+        "shortAccount": "0.2486",
+        "timestamp": 1793318400000
+    },
+    {
+        "symbol": "BNBUSDT",
+        "longAccount": "0.7256",
+        "longShortRatio": "2.6443",
+        "shortAccount": "0.2744",
+        "timestamp": 1793361600000
+    },
+    {
+        "symbol": "BNBUSDT",
+        "longAccount": "0.7299",
+        "longShortRatio": "2.7023",
+        "shortAccount": "0.2701",
+        "timestamp": 1793404800000
+    }
+]

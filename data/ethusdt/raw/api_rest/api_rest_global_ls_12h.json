@@ -1,0 +1,394 @@
+[
+    {
+        "symbol": "ETHUSDT",
+        "longAccount": "0.7432",
+        "longShortRatio": "2.8941",
+        "shortAccount": "0.2568",
+        "timestamp": 1791028800000
+    },
+    {
+        "symbol": "ETHUSDT",
+        "longAccount": "0.7409",
+        "longShortRatio": "2.8595",
+        "shortAccount": "0.2591",
+        "timestamp": 1791072000000
+    },
+    {
+        "symbol": "ETHUSDT",
+        "longAccount": "0.7311",
+        "longShortRatio": "2.7189",
+        "shortAccount": "0.2689",
+        "timestamp": 1791115200000
+    },
+    {
+        "symbol": "ETHUSDT",
+        "longAccount": "0.7124",
+        "longShortRatio": "2.4771",
+        "shortAccount": "0.2876",
+        "timestamp": 1791158400000
+    },
+    {
+        "symbol": "ETHUSDT",
+        "longAccount": "0.7056",
+        "longShortRatio": "2.3967",
+        "shortAccount": "0.2944",
+        "timestamp": 1791201600000
+    },
+    {
+        "symbol": "ETHUSDT",
+        "longAccount": "0.7139",
+        "longShortRatio": "2.4953",
+        "shortAccount": "0.2861",
+        "timestamp": 1791244800000
+    },
+    {
+        "symbol": "ETHUSDT",
+        "longAccount": "0.7103",
+        "longShortRatio": "2.4518",
+        "shortAccount": "0.2897",
+        "timestamp": 1791288000000
+    },
+    {
+        "symbol": "ETHUSDT",
+        "longAccount": "0.7284",
+        "longShortRatio": "2.6819",
+        "shortAccount": "0.2716",
+        "timestamp": 1791331200000
+    },
+    {
+        "symbol": "ETHUSDT",
+        "longAccount": "0.7698",
+        "longShortRatio": "3.3440",
+        "shortAccount": "0.2302",
+        "timestamp": 1791374400000
+    },
+    {
+        "symbol": "ETHUSDT",
+        "longAccount": "0.7719",
+        "longShortRatio": "3.3840",
+        "shortAccount": "0.2281",
+        "timestamp": 1791417600000
+    },
+    {
+        "symbol": "ETHUSDT",
+        "longAccount": "0.7713",
+        "longShortRatio": "3.3725",
+        "shortAccount": "0.2287",
+        "timestamp": 1791460800000
+    },
+    {
+        "symbol": "ETHUSDT",
+        "longAccount": "0.7708",
+        "longShortRatio": "3.3630",
+        "shortAccount": "0.2292",
+        "timestamp": 1791504000000
+    },
+    {
+        "symbol": "ETHUSDT",
+        "longAccount": "0.7515",
+        "longShortRatio": "3.0241",
+        "shortAccount": "0.2485",
+        "timestamp": 1791547200000
+    },
+    {
+        "symbol": "ETHUSDT",
+        "longAccount": "0.7502",
+        "longShortRatio": "3.0032",
+        "shortAccount": "0.2498",
+        "timestamp": 1791590400000
+    },
+    {
+        "symbol": "ETHUSDT",
+        "longAccount": "0.7514",
+        "longShortRatio": "3.0225",
+        "shortAccount": "0.2486",
+        "timestamp": 1791633600000
+    },
+    {
+        "symbol": "ETHUSDT",
+        "longAccount": "0.7505",
+        "longShortRatio": "3.0080",
+        "shortAccount": "0.2495",
+        "timestamp": 1791676800000
+    },
+    {
+        "symbol": "ETHUSDT",
+        "longAccount": "0.7467",
+        "longShortRatio": "2.9479",
+        "shortAccount": "0.2533",
+        "timestamp": 1791720000000
+    },
+    {
+        "symbol": "ETHUSDT",
+        "longAccount": "0.7418",
+        "longShortRatio": "2.8730",
+        "shortAccount": "0.2582",
+        "timestamp": 1791763200000
+    },
+    {
+        "symbol": "ETHUSDT",
+        "longAccount": "0.7223",
+        "longShortRatio": "2.6010",
+        "shortAccount": "0.2777",
+        "timestamp": 1791806400000
+    },
+    {
+        "symbol": "ETHUSDT",
+        "longAccount": "0.7519",
+        "longShortRatio": "3.0306",
+        "shortAccount": "0.2481",
+        "timestamp": 1791849600000
+    },
+    {
+        "symbol": "ETHUSDT",
+        "longAccount": "0.7228",
+        "longShortRatio": "2.6075",
+        "shortAccount": "0.2772",
+        "timestamp": 1791892800000
+    },
+    {
+        "symbol": "ETHUSDT",
+        "longAccount": "0.7267",
+        "longShortRatio": "2.6590",
+        "shortAccount": "0.2733",
+        "timestamp": 1791936000000
+    },
+    {
+        "symbol": "ETHUSDT",
+        "longAccount": "0.7402",
+        "longShortRatio": "2.8491",
+        "shortAccount": "0.2598",
+        "timestamp": 1791979200000
+    },
+    {
+        "symbol": "ETHUSDT",
+        "longAccount": "0.7714",
+        "longShortRatio": "3.3745",
+        "shortAccount": "0.2286",
+        "timestamp": 1792022400000
+    },
+    {
+        "symbol": "ETHUSDT",
+        "longAccount": "0.7591",
+        "longShortRatio": "3.1511",
+        "shortAccount": "0.2409",
+        "timestamp": 1792065600000
+    },
+    {
+        "symbol": "ETHUSDT",
+        "longAccount": "0.7252",
+        "longShortRatio": "2.6390",
+        "shortAccount": "0.2748",
+        "timestamp": 1792108800000
+    },
+    {
+        "symbol": "ETHUSDT",
+        "longAccount": "0.7135",
+        "longShortRatio": "2.4904",
+        "shortAccount": "0.2865",
+        "timestamp": 1792152000000
+    },
+    {
+        "symbol": "ETHUSDT",
+        "longAccount": "0.7447",
+        "longShortRatio": "2.9170",
+        "shortAccount": "0.2553",
+        "timestamp": 1792195200000
+    },
+    {
+        "symbol": "ETHUSDT",
+        "longAccount": "0.7363",
+        "longShortRatio": "2.7922",
+        "shortAccount": "0.2637",
+        "timestamp": 1792238400000
+    },
+    {
+        "symbol": "ETHUSDT",
+        "longAccount": "0.7549",
+        "longShortRatio": "3.0800",
+        "shortAccount": "0.2451",
+        "timestamp": 1792281600000
+    },
+    {
+        "symbol": "ETHUSDT",
+        "longAccount": "0.7430",
+        "longShortRatio": "2.8911",
+        "shortAccount": "0.2570",
+        "timestamp": 1792324800000
+    },
+    {
+        "symbol": "ETHUSDT",
+        "longAccount": "0.7726",
+        "longShortRatio": "3.3975",
+        "shortAccount": "0.2274",
+        "timestamp": 1792368000000
+    },
+    {
+        "symbol": "ETHUSDT",
+        "longAccount": "0.7236",
+        "longShortRatio": "2.6179",
+        "shortAccount": "0.2764",
+        "timestamp": 1792411200000
+    },
+    {
+        "symbol": "ETHUSDT",
+        "longAccount": "0.7523",
+        "longShortRatio": "3.0371",
+        "shortAccount": "0.2477",
+        "timestamp": 1792454400000
+    },
+    {
+        "symbol": "ETHUSDT",
+        "longAccount": "0.7604",
+        "longShortRatio": "3.1736",
+        "shortAccount": "0.2396",
+        "timestamp": 1792497600000
+    },
+    {
+        "symbol": "ETHUSDT",
+        "longAccount": "0.7323",
+        "longShortRatio": "2.7355",
+        "shortAccount": "0.2677",
+        "timestamp": 1792540800000
+    },
+    {
+        "symbol": "ETHUSDT",
+        "longAccount": "0.7204",
+        "longShortRatio": "2.5765",
+        "shortAccount": "0.2796",
+        "timestamp": 1792584000000
+    },
+    {
+        "symbol": "ETHUSDT",
+        "longAccount": "0.7018",
+        "longShortRatio": "2.3535",
+        "shortAccount": "0.2982",
+        "timestamp": 1792627200000
+    },
+    {
+        "symbol": "ETHUSDT",
+        "longAccount": "0.7600",
+        "longShortRatio": "3.1667",
+        "shortAccount": "0.2400",
+        "timestamp": 1792670400000
+    },
+    {
+        "symbol": "ETHUSDT",
+        "longAccount": "0.7801",
+        "longShortRatio": "3.5475",
+        "shortAccount": "0.2199",
+        "timestamp": 1792713600000
+    },
+    {
+        "symbol": "ETHUSDT",
+        "longAccount": "0.7733",
+        "longShortRatio": "3.4111",
+        "shortAccount": "0.2267",
+        "timestamp": 1792756800000
+    },
+    {
+        "symbol": "ETHUSDT",
+        "longAccount": "0.7605",
+        "longShortRatio": "3.1754",
+        "shortAccount": "0.2395",
+        "timestamp": 1792800000000
+    },
+    {
+        "symbol": "ETHUSDT",
+        "longAccount": "0.7604",
+        "longShortRatio": "3.1736",
+        "shortAccount": "0.2396",
+        "timestamp": 1792843200000
+    },
+    {
+        "symbol": "ETHUSDT",
+        "longAccount": "0.7721",
+        "longShortRatio": "3.3879",
+        "shortAccount": "0.2279",
+        "timestamp": 1792886400000
+    },
+    {
+        "symbol": "ETHUSDT",
+        "longAccount": "0.7613",
+        "longShortRatio": "3.1894",
+        "shortAccount": "0.2387",
+        "timestamp": 1792929600000
+    },
+    {
+        "symbol": "ETHUSDT",
+        "longAccount": "0.7668",
+        "longShortRatio": "3.2882",
+        "shortAccount": "0.2332",
+        "timestamp": 1792972800000
+    },
+    {
+        "symbol": "ETHUSDT",
+        "longAccount": "0.7718",
+        "longShortRatio": "3.3821",
+        "shortAccount": "0.2282",
+        "timestamp": 1793016000000
+    },
+    {
+        "symbol": "ETHUSDT",
+        "longAccount": "0.7722",
+        "longShortRatio": "3.3898",
+        "shortAccount": "0.2278",
+        "timestamp": 1793059200000
+    },
+    {
+        "symbol": "ETHUSDT",
+        "longAccount": "0.7736",
+        "longShortRatio": "3.4170",
+        "shortAccount": "0.2264",
+        "timestamp": 1793102400000
+    },
+    {
+        "symbol": "ETHUSDT",
+        "longAccount": "0.7538",
+        "longShortRatio": "3.0617",
+        "shortAccount": "0.2462",
+        "timestamp": 1793145600000
+    },
+    {
+        "symbol": "ETHUSDT",
+        "longAccount": "0.7438",
+        "longShortRatio": "2.9032",
+        "shortAccount": "0.2562",
+        "timestamp": 1793188800000
+    },
+    {
+        "symbol": "ETHUSDT",
+        "longAccount": "0.7610",
+        "longShortRatio": "3.1841",
+        "shortAccount": "0.2390",
+        "timestamp": 1793232000000
+    },
+    {
+        "symbol": "ETHUSDT",
+        "longAccount": "0.7758",
+        "longShortRatio": "3.4603",
+        "shortAccount": "0.2242",
+        "timestamp": 1793275200000
+    },
+    {
+        "symbol": "ETHUSDT",
+        "longAccount": "0.7673",
+        "longShortRatio": "3.2974",
+        "shortAccount": "0.2327",
+        "timestamp": 1793318400000
+    },
+    {
+        "symbol": "ETHUSDT",
+        "longAccount": "0.7395",
+        "longShortRatio": "2.8388",
+        "shortAccount": "0.2605",
+        "timestamp": 1793361600000
+    },
+    {
+        "symbol": "ETHUSDT",
+        "longAccount": "0.7445",
+        "longShortRatio": "2.9139",
+        "shortAccount": "0.2555",
+        "timestamp": 1793404800000
+    }
+]
