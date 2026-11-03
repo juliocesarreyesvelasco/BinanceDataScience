@@ -1,22 +1,73 @@
 # Documentación del Pipeline de Ingesta: Binance Data Science
 
 **Arquitectura del Sistema**
-El sistema opera mediante una arquitectura modular de cuatro componentes diseñados para sortear los límites de peticiones (rate limits) y restricciones históricas de Binance:
-1. **Orquestador (`auth.py`)**: Coordina los ciclos temporales, gestiona las pausas (1 segundo) para proteger el límite de 2,400 de peso por minuto y administra los bloques de descarga según el límite de cada endpoint de la API.
-2. **Motor de Extracción (`fetcher.py`)**: Ejecuta las peticiones HTTP. Descarga e ingesta en la memoria RAM (sin tocar el disco duro) los archivos ZIP estáticos de Binance Vision, y consume los endpoints REST autenticados para datos recientes y derivados.
-3. **Almacenamiento y Estado (`storage.py`)**: Centraliza la escritura en disco. Deduplica cualquier dataset basándose en su campo de tiempo clave (ej. `open_time_ms`, `fundingTime`, `time`) y gestiona un archivo `checkpoint_*.json` para garantizar que el sistema pueda reanudar la ingesta exactamente donde fue interrumpido.
-4. **Consolidador (`consolidator.py`)**: Procesa los datos crudos, unifica las zonas horarias a UTC, inyecta columnas de trazabilidad y calcula variaciones de volumen y rendimiento para entregar datasets listos para Machine Learning.
+
+El sistema opera mediante una arquitectura modular de cuatro componentes. La ingesta usa únicamente la API REST de Binance; Binance Vision quedó archivado como herramienta manual de recuperación y las liquidaciones forzadas están fuera del alcance.
+
+1. **Orquestador (`auth.py`)**: coordina los ciclos temporales, protege el pipeline con un bloqueo de ejecución (`flock`), gestiona las pausas de 1 segundo para respetar los límites de la API y administra los bloques de descarga según el límite de cada endpoint.
+2. **Motor de Extracción (`fetcher.py`)**: ejecuta las peticiones HTTP a la API REST para Klines, Funding Rates y métricas de sentimiento.
+3. **Almacenamiento y Estado (`storage.py`)**: centraliza la escritura en disco con operaciones atómicas, deduplica cualquier dataset por su campo de tiempo clave (`open_time_ms`, `fundingTime`, `timestamp`) y gestiona los archivos `checkpoint_*.json` para reanudar la ingesta.
+4. **Consolidador (`consolidator.py`)**: procesa los datos crudos, agrega columnas de trazabilidad, calcula variables derivadas y entrega los datasets listos para Machine Learning. Añade `fecha_local` en hora de Ciudad de México junto a `fecha_utc`.
 
 **Lógica de Extracción y Control de Estado**
-La ingesta combina dos métodos para superar el límite institucional de Binance, el cual restringe la consulta de métricas de sentimiento a solo 30 días en el pasado. Para lograr una historia completa de 3 años, el sistema usa los repositorios estáticos para reconstruir el pasado lejano y la API en tiempo real para las ventanas recientes. Si un endpoint falla por error de límite de peticiones (HTTP 429) o rechazo de parámetros (ej. `limit=1000` en liquidaciones), el sistema guarda su progreso seguro en los checkpoints y avanza, permitiendo recuperar los huecos en la siguiente ejecución.
 
-**Inventario de Datos Disponibles en Binance**
-* **Binance Vision (Repositorio Estático HTTP)**: Almacena Klines (12 campos estándar), Trades públicos, AggTrades (volumen agresivo) y Snapshots de Order Book. Permite descargas históricas masivas sin consumir saldo de API.
-* **API REST Autenticada (`fapi.binance.com`)**: Proporciona datos de derivados en vivo y hasta 30 días de historia profunda. Requiere firma criptográfica HMAC y otorga acceso al Funding Rate histórico, registro forzado de Liquidaciones (`allForceOrders`), Open Interest y Ratios Long/Short globales y de cuentas Top.
-* **WebSockets**: Flujos persistentes para ingesta en tiempo real. Transmiten eventos en el milisegundo exacto (`@forceOrder`, `@bookTicker`), ideales para latencia ultrabaja pero inútiles para reconstrucción histórica.
+La API REST permite reconstruir Klines y Funding Rates con varios años de historia. Las métricas de sentimiento tienen una restricción de 28 días hacia el pasado, por lo que el pipeline las captura de forma recurrente y las acumula en `raw/` para construir un histórico propio. Si un endpoint falla por límite de peticiones (HTTP 429) o por parámetros inválidos, el sistema conserva el progreso en los checkpoints y lo reintenta en la siguiente ejecución.
+
+**Fuentes Utilizadas**
+
+* **API REST Autenticada (`fapi.binance.com`)**: Klines históricas y recientes, Funding Rates, Open Interest, ratios Long/Short globales y de Traders Top, y Taker Long/Short Volume.
+* **Binance Vision (archivado)**: se conserva el script en `binance_vision/backfill_vision.py` como respaldo manual. Ya no participa en la ejecución diaria.
+* **Liquidaciones forzadas**: fuera de alcance. El endpoint público `allForceOrders` ya no está disponible y el método de python-binance consulta órdenes propias, no el mercado.
 
 **Datos Extraídos en este Proyecto**
-* **Klines Completas (15m y 12h)**: 3 años de velas obtenidas combinando Binance Vision (historia profunda) y API REST (historia reciente).
-* **Tasa de Financiamiento (Funding Rates)**: Historial completo extraído de la API, capturando el pago de fondeo cada 8 horas.
-* **Liquidaciones (Force Orders)**: Órdenes liquidadas forzosamente extraídas vía API en bloques de 7 días, limitadas a 100 registros por petición.
-* **Sentimiento de Mercado**: Open Interest, Global Long/Short Ratio, Top Accounts Long/Short Ratio, Top Positions Long/Short Ratio y Taker Long/Short Volume. Extraídos de la API en la máxima ventana permitida de 28 días hacia el pasado.
+
+* **Klines Completas (15m y 12h)**: 3 años de velas obtenidas de la API REST.
+* **Tasa de Financiamiento (Funding Rates)**: historial completo extraído de la API, con pagos cada 8 horas.
+* **Sentimiento de Mercado**: Open Interest, Global Long/Short Ratio, Top Accounts Long/Short Ratio, Top Positions Long/Short Ratio y Taker Long/Short Volume. Ventana máxima de 28 días, acumulada en el archivo local.
+
+# Estructura de directorios
+
+```text
+data/
+└── btcusdt/
+    ├── raw/
+    │   ├── binance_vision/          # archivo frío, ya no se lee en el pipeline
+    │   └── api_rest/
+    │       ├── api_rest_klines_15m.csv / .json
+    │       ├── api_rest_klines_12h.csv / .json
+    │       ├── api_rest_funding_rate.csv / .json
+    │       ├── api_rest_open_interest_15m.csv / .json
+    │       ├── api_rest_global_ls_15m.csv / .json
+    │       ├── api_rest_top_ls_accounts_15m.csv / .json
+    │       ├── api_rest_top_ls_positions_15m.csv / .json
+    │       └── api_rest_taker_vol_15m.csv / .json
+    ├── checkpoints/
+    │   ├── checkpoint_api_rest_klines_15m.json
+    │   ├── checkpoint_api_rest_klines_12h.json
+    │   └── checkpoint_api_rest_funding_rate.json
+    └── consolidado/
+        ├── klines_15m_master.csv
+        ├── klines_12h_master.csv
+        ├── funding_rates_master.csv
+        ├── sentimiento_15m_master.csv
+        ├── sentimiento_12h_master.csv
+        ├── dataset_analisis_15m.csv
+        └── dataset_analisis_12h.csv
+```
+
+# Flujo de datos
+
+```text
+FUENTES CRUDAS (raw/)                                      ARCHIVOS EN consolidado/
+─────────────────────────────────────────────────────────────────────────────────────────────
+[api_rest_klines_15m]                     ───► 1. klines_15m_master.csv
+[api_rest_klines_12h]                     ───► 2. klines_12h_master.csv
+[api_rest_funding_rate]                   ───► 3. funding_rates_master.csv
+[api_rest_sentimiento (5 métricas 15m)]   ───► 4. sentimiento_15m_master.csv
+[api_rest_sentimiento (5 métricas 12h)]   ───► 5. sentimiento_12h_master.csv
+                                                          │
+   ┌──────────────────────────────────────────────────────┘
+   ▼
+Fusión horizontal de [1] + [3] + [4]           ───► 6. dataset_analisis_15m.csv
+Fusión horizontal de [2] + [3] + [5]           ───► 7. dataset_analisis_12h.csv
+```

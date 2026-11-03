@@ -4,10 +4,11 @@
 
 # Entornos virtuales
 binance_env/
-venv/
-env/
-.venv/
 
 # Temporales y caché de Python
 __pycache__/
 *.py[cod]
+
+# Datos y logs generados por el pipeline
+data/
+logs/

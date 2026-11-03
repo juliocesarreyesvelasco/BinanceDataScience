@@ -1,57 +1,5 @@
-import io
-import zipfile
 import requests
-import pandas as pd
-from datetime import datetime
-from dateutil.relativedelta import relativedelta
-from pathlib import Path
 
-COLUMNAS_KLINES = [
-    "open_time_ms", "open", "high", "low", "close", "volume",
-    "close_time_ms", "quote_asset_volume", "number_of_trades",
-    "taker_buy_base_asset_volume", "taker_buy_quote_asset_volume", "ignore"
-]
-
-def descargar_zips_vision(symbol: str, tf: str, start_date: datetime, end_date: datetime, out_dir: Path, logger):
-    current_date = start_date
-    dataframes = []
-
-    while current_date < end_date:
-        mes_str = current_date.strftime("%Y-%m")
-        url = f"https://data.binance.vision/data/futures/um/monthly/klines/{symbol}/{tf}/{symbol}-{tf}-{mes_str}.zip"
-
-        try:
-            res = requests.get(url, timeout=20)
-            if res.status_code == 200:
-                logger.info(f"[binance_vision] {symbol} {tf}: Descargando {mes_str}...")
-                with zipfile.ZipFile(io.BytesIO(res.content)) as z:
-                    for filename in z.namelist():
-                        with z.open(filename) as f:
-                            df = pd.read_csv(f, header=None)
-                            dataframes.append(df)
-            else:
-                logger.warning(f"[binance_vision] {symbol} {tf}: No disponible {mes_str} (HTTP {res.status_code})")
-        except Exception as e:
-            logger.error(f"[binance_vision] Error descargando {mes_str}: {e}")
-
-        current_date += relativedelta(months=1)
-
-    if dataframes:
-        df_master = pd.concat(dataframes, ignore_index=True)
-        if df_master.shape[1] == 12:
-            df_master.columns = COLUMNAS_KLINES
-        
-        df_master["open_time_ms"] = pd.to_numeric(df_master["open_time_ms"], errors="coerce")
-        df_master.dropna(subset=["open_time_ms"], inplace=True)
-        df_master["open_time_ms"] = df_master["open_time_ms"].astype("int64")
-        df_master.drop_duplicates(subset=["open_time_ms"], keep="last", inplace=True)
-        df_master.sort_values("open_time_ms", inplace=True)
-
-        archivo_csv = out_dir / f"binance_vision_klines_{tf}.csv"
-        df_master.to_csv(archivo_csv, index=False)
-        logger.info(f"[binance_vision] Archivo consolidado guardado: {archivo_csv.name} ({len(df_master)} filas)")
-        return len(df_master)
-    return 0
 
 def obtener_klines_api(client, symbol: str, tf: str, start_ms: int, end_ms: int, logger) -> list:
     try:
@@ -78,6 +26,7 @@ def obtener_klines_api(client, symbol: str, tf: str, start_ms: int, end_ms: int,
         logger.error(f"[api_rest_klines_{tf}] Error: {e}")
         return []
 
+
 def obtener_funding_rates(client, symbol: str, start_ms: int, end_ms: int, logger) -> list:
     try:
         data = client.futures_funding_rate(symbol=symbol, startTime=start_ms, endTime=end_ms, limit=1000)
@@ -86,13 +35,6 @@ def obtener_funding_rates(client, symbol: str, start_ms: int, end_ms: int, logge
         logger.error(f"[api_rest_funding] Error: {e}")
         return []
 
-def obtener_liquidaciones(client, symbol: str, start_ms: int, end_ms: int, logger) -> list:
-    try:
-        data = client.futures_liquidation_orders(symbol=symbol, startTime=start_ms, endTime=end_ms, limit=100)
-        return data or []
-    except Exception as e:
-        logger.error(f"[api_rest_liquidaciones] Error: {e}")
-        return []
 
 def obtener_metricas_sentimiento(api_key: str, symbol: str, tf: str, start_ms: int, end_ms: int, logger) -> dict:
     metricas = {

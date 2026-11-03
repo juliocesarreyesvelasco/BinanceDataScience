@@ -1,0 +1,14 @@
+# Credenciales y variables sensibles
+.env
+*.env
+
+# Entornos virtuales
+binance_env/
+
+# Temporales y caché de Python
+__pycache__/
+*.py[cod]
+
+# Datos y logs generados por el pipeline
+data/
+logs/
