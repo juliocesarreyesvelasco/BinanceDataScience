@@ -9,6 +9,15 @@ import storage
 
 ZONA_HORARIA = ZoneInfo("America/Mexico_City")
 
+COLUMNAS_KLINES = [
+    "open_time_ms", "open", "high", "low", "close", "volume",
+    "close_time_ms", "quote_asset_volume", "number_of_trades",
+    "taker_buy_base_asset_volume", "taker_buy_quote_asset_volume",
+]
+COLUMNAS_KLINES_ESTADO = COLUMNAS_KLINES + ["fecha_procesamiento"]
+
+INTERVALO_MS = {"5m": 300_000, "15m": 900_000, "12h": 43_200_000}
+
 RENOMBRES_SENTIMIENTO = {
     "open_interest": {
         "sumOpenInterest": "oi_sum_open_interest",
@@ -37,6 +46,42 @@ RENOMBRES_SENTIMIENTO = {
     },
 }
 
+COLUMNAS_SENTIMIENTO_DATASET = [
+    "oi_sum_open_interest", "oi_value_usd", "oi_cmc_circulating_supply",
+    "global_ls_long_account", "global_ls_ratio", "global_ls_short_account",
+    "top_accounts_long_account", "top_accounts_ratio", "top_accounts_short_account",
+    "top_positions_long_account", "top_positions_ratio", "top_positions_short_account",
+    "taker_buy_sell_ratio", "taker_sell_vol", "taker_buy_vol",
+]
+
+COLUMNAS_SENTIMIENTO_MASTER = [
+    "symbol", "fecha_utc", "fecha_local",
+    "oi_sum_open_interest", "oi_value_usd", "oi_cmc_circulating_supply",
+    "timestamp",
+    "global_ls_long_account", "global_ls_ratio", "global_ls_short_account",
+    "top_accounts_long_account", "top_accounts_ratio", "top_accounts_short_account",
+    "top_positions_long_account", "top_positions_ratio", "top_positions_short_account",
+    "taker_buy_sell_ratio", "taker_sell_vol", "taker_buy_vol",
+    "origen_datos", "fecha_procesamiento",
+]
+
+COLUMNAS_FUNDING_MASTER = [
+    "symbol", "fecha_utc", "fecha_local", "fundingTime", "fundingRate",
+    "markPrice", "rateType", "origen_datos", "fecha_procesamiento",
+]
+
+COLUMNAS_DATASET = [
+    "symbol", "fecha_utc", "fecha_local",
+    "open_time_ms", "open", "high", "low", "close", "volume",
+    "close_time_ms", "quote_asset_volume", "number_of_trades",
+    "taker_buy_base_asset_volume", "taker_buy_quote_asset_volume",
+    "origen_datos", "fecha_procesamiento",
+    "retorno_pct", "rango_hl_pct", "taker_sell_quote_asset_volume",
+    "delta_vol_total_usd", "delta_vol_comprador_usd", "delta_vol_vendedor_usd",
+    *COLUMNAS_SENTIMIENTO_DATASET,
+    "fundingRate",
+]
+
 
 def setup_consolidator_logger(log_dir: Path):
     c_logger = logging.getLogger("consolidator_audit")
@@ -56,207 +101,281 @@ def _fecha_local_desde_ms(serie_ms: pd.Series) -> pd.Series:
     return pd.to_datetime(serie_ms, unit="ms", utc=True).dt.tz_convert(ZONA_HORARIA)
 
 
-def consolidar_symbol(symbol: str, data_dir: Path, log_dir: Path):
-    logger = setup_consolidator_logger(log_dir)
-    symbol_dir = data_dir / symbol.lower()
-    raw_dir = symbol_dir / "raw"
-    out_dir = symbol_dir / "consolidado"
-    out_dir.mkdir(parents=True, exist_ok=True)
+def _leer_csv(archivo: Path) -> pd.DataFrame:
+    try:
+        return pd.read_csv(archivo, low_memory=False)
+    except pd.errors.EmptyDataError:
+        return pd.DataFrame()
 
-    bloqueos = sorted(out_dir.glob(".~lock.*#"))
-    if bloqueos:
-        nombres = ", ".join(p.name for p in bloqueos)
-        logger.warning(f"[{symbol.upper()}] Consolidación omitida: hay archivos abiertos ({nombres}).")
-        return
 
-    fecha_procesamiento = datetime.now(ZONA_HORARIA).isoformat(timespec="seconds")
-    logger.info("=========================================================================================")
-    logger.info(f"INICIANDO CONSOLIDACIÓN AUDITADA PARA: {symbol.upper()}")
-    logger.info("=========================================================================================")
+def _coerce_klines(df: pd.DataFrame) -> pd.DataFrame:
+    df["open_time_ms"] = pd.to_numeric(df["open_time_ms"], errors="coerce")
+    df = df.dropna(subset=["open_time_ms"])
+    df["open_time_ms"] = df["open_time_ms"].astype("int64")
+    for columna in [
+        "open", "high", "low", "close", "volume", "quote_asset_volume",
+        "taker_buy_base_asset_volume", "taker_buy_quote_asset_volume",
+    ]:
+        if columna in df.columns:
+            df[columna] = pd.to_numeric(df[columna], errors="coerce")
+    for columna in ["close_time_ms", "number_of_trades"]:
+        if columna in df.columns:
+            df[columna] = pd.to_numeric(df[columna], errors="coerce")
+            if df[columna].notna().all():
+                df[columna] = df[columna].astype("int64")
+    return df
 
-    resumen_salidas = []
 
-    def log_transformacion(archivo_nombre, origen_desc, filas_origen, filas_duplicadas, filas_finales, df_resultado):
-        rango_fechas = "N/A"
-        columna_fecha = "fecha_local" if "fecha_local" in df_resultado.columns else "fecha_utc"
-        if not df_resultado.empty and columna_fecha in df_resultado.columns:
-            rango_fechas = f"{df_resultado[columna_fecha].min()} -> {df_resultado[columna_fecha].max()}"
+def normalizar_klines(datos: list) -> pd.DataFrame:
+    if not datos:
+        return pd.DataFrame(columns=COLUMNAS_KLINES)
+    df = pd.DataFrame(datos)
+    if "open_time_ms" not in df.columns:
+        return pd.DataFrame(columns=COLUMNAS_KLINES)
+    df = _coerce_klines(df)
+    df = df.drop_duplicates(subset=["open_time_ms"], keep="last")
+    df = df.sort_values("open_time_ms").reset_index(drop=True)
+    return df.reindex(columns=COLUMNAS_KLINES)
 
-        logger.info(f"[PROCESADO] {archivo_nombre}")
-        logger.info(f"  • Archivo(s) Fuente: {origen_desc}")
-        logger.info(f"  • Filas brutas leídas: {filas_origen} | Duplicadas descartadas: {filas_duplicadas} | Consolidadas: {filas_finales}")
-        logger.info(f"  • Rango Temporal: {rango_fechas}")
 
-        resumen_salidas.append({
-            "Archivo Consolidado": archivo_nombre,
-            "Filas": filas_finales,
-            "Columnas": len(df_resultado.columns),
-            "Rango Fechas": rango_fechas
-        })
+def cargar_estado_klines(archivo: Path) -> pd.DataFrame:
+    if not archivo.exists():
+        return pd.DataFrame(columns=COLUMNAS_KLINES_ESTADO)
+    try:
+        columnas = pd.read_csv(archivo, nrows=0).columns
+    except pd.errors.EmptyDataError:
+        return pd.DataFrame(columns=COLUMNAS_KLINES_ESTADO)
+    usecols = [c for c in COLUMNAS_KLINES_ESTADO if c in columnas]
+    df = pd.read_csv(archivo, usecols=usecols, low_memory=False)
+    if "open_time_ms" not in df.columns:
+        return pd.DataFrame(columns=COLUMNAS_KLINES_ESTADO)
+    df = _coerce_klines(df)
+    df = df.drop_duplicates(subset=["open_time_ms"], keep="last")
+    df = df.sort_values("open_time_ms").reset_index(drop=True)
+    df = df.reindex(columns=COLUMNAS_KLINES_ESTADO)
+    return df
 
-    # 1 & 2. Klines Maestras (API REST)
-    def procesar_klines(tf):
-        f_api = raw_dir / "api_rest" / f"api_rest_klines_{tf}.csv"
-        archivo_nombre = f"klines_{tf}_master.csv"
 
-        if not f_api.exists():
-            vacio = pd.DataFrame()
-            storage.escribir_csv(vacio, out_dir / archivo_nombre)
-            log_transformacion(archivo_nombre, "Sin archivo fuente", 0, 0, 0, vacio)
-            return vacio
+def detectar_huecos(df: pd.DataFrame, tf: str) -> list[tuple[int, int]]:
+    intervalo = INTERVALO_MS.get(tf)
+    if intervalo is None or df is None or len(df) < 2:
+        return []
+    tiempos = df["open_time_ms"].astype("int64").sort_values().reset_index(drop=True)
+    diferencias = tiempos.diff()
+    huecos = []
+    for indice in diferencias[diferencias > intervalo].index:
+        anterior = int(tiempos.iloc[indice - 1])
+        actual = int(tiempos.iloc[indice])
+        inicio = anterior + intervalo
+        if inicio < actual:
+            huecos.append((inicio, actual))
+    return huecos
 
-        df = pd.read_csv(f_api, low_memory=False)
-        filas_brutas = len(df)
-        df["origen_datos"] = "api_rest"
 
-        df["open_time_ms"] = pd.to_numeric(df["open_time_ms"], errors="coerce")
-        df.dropna(subset=["open_time_ms"], inplace=True)
-        df["open_time_ms"] = df["open_time_ms"].astype("int64")
+def combinar_klines(df_old: pd.DataFrame, df_nuevos: pd.DataFrame) -> pd.DataFrame:
+    partes = [d for d in (df_old, df_nuevos) if d is not None and not d.empty]
+    if not partes:
+        return pd.DataFrame(columns=COLUMNAS_KLINES_ESTADO)
+    df = pd.concat(partes, ignore_index=True, sort=False)
+    df = _coerce_klines(df)
+    df = df.drop_duplicates(subset=["open_time_ms"], keep="last")
+    df = df.sort_values("open_time_ms").reset_index(drop=True)
+    return df.reindex(columns=COLUMNAS_KLINES_ESTADO)
 
-        duplicados = df.duplicated(subset=["open_time_ms"]).sum()
-        df.drop_duplicates(subset=["open_time_ms"], keep="last", inplace=True)
-        df.sort_values("open_time_ms", inplace=True)
 
-        df.insert(0, "symbol", symbol.upper())
-        df.insert(1, "fecha_utc", pd.to_datetime(df["open_time_ms"], unit="ms"))
-        df.insert(2, "fecha_local", _fecha_local_desde_ms(df["open_time_ms"]))
-        df["fecha_procesamiento"] = fecha_procesamiento
+def _normalizar_funding(symbol: str, datos: list, fecha_procesamiento: str) -> pd.DataFrame:
+    if not datos:
+        return pd.DataFrame(columns=COLUMNAS_FUNDING_MASTER)
+    df = pd.DataFrame(datos)
+    if "fundingTime" not in df.columns:
+        return pd.DataFrame(columns=COLUMNAS_FUNDING_MASTER)
+    df["fundingTime"] = pd.to_numeric(df["fundingTime"], errors="coerce")
+    df = df.dropna(subset=["fundingTime"])
+    df["fundingTime"] = df["fundingTime"].astype("int64")
+    df = df.drop_duplicates(subset=["fundingTime"], keep="last")
+    df = df.sort_values("fundingTime").reset_index(drop=True)
+    df["symbol"] = symbol.upper()
+    df["fecha_utc"] = pd.to_datetime(df["fundingTime"], unit="ms")
+    df["fecha_local"] = _fecha_local_desde_ms(df["fundingTime"])
+    for columna in ["fundingRate", "markPrice"]:
+        if columna in df.columns:
+            df[columna] = pd.to_numeric(df[columna], errors="coerce")
+    if "rateType" not in df.columns:
+        df["rateType"] = None
+    df["origen_datos"] = "api_funding"
+    df["fecha_procesamiento"] = fecha_procesamiento
+    return df.reindex(columns=COLUMNAS_FUNDING_MASTER)
 
-        for c in ["open", "high", "low", "close", "volume", "quote_asset_volume", "taker_buy_base_asset_volume", "taker_buy_quote_asset_volume"]:
-            if c in df.columns:
-                df[c] = pd.to_numeric(df[c], errors="coerce")
 
-        storage.escribir_csv(df, out_dir / archivo_nombre)
-        log_transformacion(archivo_nombre, f_api.name, filas_brutas, duplicados, len(df), df)
-        return df
+def cargar_funding_master(out_dir: Path) -> pd.DataFrame:
+    archivo = out_dir / "funding_rates_master.csv"
+    if not archivo.exists():
+        return pd.DataFrame(columns=COLUMNAS_FUNDING_MASTER)
+    df = _leer_csv(archivo)
+    if "fundingTime" not in df.columns:
+        return pd.DataFrame(columns=COLUMNAS_FUNDING_MASTER)
+    df["fundingTime"] = pd.to_numeric(df["fundingTime"], errors="coerce")
+    df = df.dropna(subset=["fundingTime"])
+    df["fundingTime"] = df["fundingTime"].astype("int64")
+    df = df.drop_duplicates(subset=["fundingTime"], keep="last")
+    df = df.sort_values("fundingTime").reset_index(drop=True)
+    return df.reindex(columns=COLUMNAS_FUNDING_MASTER)
 
-    df_k15 = procesar_klines("15m")
-    df_k12 = procesar_klines("12h")
 
-    # 3. Funding Rates Master
-    f_fund = raw_dir / "api_rest" / "api_rest_funding_rate.csv"
-    archivo_fund_nombre = "funding_rates_master.csv"
-    df_fund = pd.DataFrame()
-    if f_fund.exists():
-        df_fund = pd.read_csv(f_fund, low_memory=False)
-        filas_brutas = len(df_fund)
-        df_fund["fundingTime"] = pd.to_numeric(df_fund["fundingTime"], errors="coerce")
-        df_fund.dropna(subset=["fundingTime"], inplace=True)
-        df_fund["fundingTime"] = df_fund["fundingTime"].astype("int64")
-
-        dups = df_fund.duplicated(subset=["fundingTime"]).sum()
-        df_fund.drop_duplicates(subset=["fundingTime"], keep="last", inplace=True)
-        df_fund.sort_values("fundingTime", inplace=True)
-
-        df_fund.insert(1, "fecha_utc", pd.to_datetime(df_fund["fundingTime"], unit="ms"))
-        df_fund.insert(2, "fecha_local", _fecha_local_desde_ms(df_fund["fundingTime"]))
-        df_fund["fundingRate"] = pd.to_numeric(df_fund["fundingRate"], errors="coerce")
-        df_fund["origen_datos"] = "api_funding"
-        df_fund["fecha_procesamiento"] = fecha_procesamiento
-
-        storage.escribir_csv(df_fund, out_dir / archivo_fund_nombre)
-        log_transformacion(archivo_fund_nombre, f_fund.name, filas_brutas, dups, len(df_fund), df_fund)
+def actualizar_master_funding(symbol: str, nuevos: list, out_dir: Path, logger, fecha_procesamiento: str) -> pd.DataFrame:
+    archivo = out_dir / "funding_rates_master.csv"
+    df_old = cargar_funding_master(out_dir)
+    df_new = _normalizar_funding(symbol, nuevos, fecha_procesamiento)
+    if df_new.empty:
+        return df_old
+    if df_old.empty:
+        df_final = df_new
     else:
-        storage.escribir_csv(df_fund, out_dir / archivo_fund_nombre)
-        log_transformacion(archivo_fund_nombre, "No encontrado", 0, 0, 0, df_fund)
+        df_old_idx = df_old.drop_duplicates(subset=["fundingTime"], keep="last").set_index("fundingTime")
+        df_new_idx = df_new.set_index("fundingTime")
+        df_final = df_new_idx.combine_first(df_old_idx).reset_index()
+        df_final = df_final.sort_values("fundingTime").reset_index(drop=True)
+        df_final = df_final.reindex(columns=COLUMNAS_FUNDING_MASTER)
+    storage.escribir_csv(df_final, archivo)
+    logger.info(f"[funding] {symbol}: +{len(df_new)} nuevos. Total: {len(df_final)} filas.")
+    return df_final
 
-    # 4 & 5. Sentimiento Master
-    def procesar_sentimiento(tf):
-        metricas = ["open_interest", "global_ls", "top_ls_accounts", "top_ls_positions", "taker_vol"]
-        df_sent = pd.DataFrame()
-        filas_brutas_total = 0
-        fuentes = []
-        archivo_sent_nombre = f"sentimiento_{tf}_master.csv"
 
-        for m in metricas:
-            f_m = raw_dir / "api_rest" / f"api_rest_{m}_{tf}.csv"
-            if f_m.exists():
-                df_temp = pd.read_csv(f_m, low_memory=False)
-                filas_brutas_total += len(df_temp)
-                fuentes.append(f_m.name)
-
-                df_temp["timestamp"] = pd.to_numeric(df_temp["timestamp"], errors="coerce")
-                df_temp.dropna(subset=["timestamp"], inplace=True)
-                df_temp["timestamp"] = df_temp["timestamp"].astype("int64")
-                df_temp.drop_duplicates(subset=["timestamp"], keep="last", inplace=True)
-
-                renombres = {viejo: nuevo for viejo, nuevo in RENOMBRES_SENTIMIENTO[m].items() if viejo in df_temp.columns}
-                df_temp.rename(columns=renombres, inplace=True)
-
-                if "symbol" in df_temp.columns:
-                    df_temp.drop(columns=["symbol"], inplace=True)
-
-                if df_sent.empty:
-                    df_sent = df_temp
-                else:
-                    df_sent = pd.merge(df_sent, df_temp, on=["timestamp"], how="outer")
-
-        if not df_sent.empty:
-            df_sent.sort_values("timestamp", inplace=True)
-            df_sent.insert(0, "symbol", symbol.upper())
-            df_sent.insert(1, "fecha_utc", pd.to_datetime(df_sent["timestamp"], unit="ms"))
-            df_sent.insert(2, "fecha_local", _fecha_local_desde_ms(df_sent["timestamp"]))
-            df_sent["origen_datos"] = "api_sentimiento"
-            df_sent["fecha_procesamiento"] = fecha_procesamiento
-
-            storage.escribir_csv(df_sent, out_dir / archivo_sent_nombre)
-            log_transformacion(archivo_sent_nombre, ", ".join(fuentes), filas_brutas_total, 0, len(df_sent), df_sent)
+def _normalizar_metricas_sentimiento(metricas: dict) -> pd.DataFrame:
+    df_sent = pd.DataFrame()
+    for metrica, renombres in RENOMBRES_SENTIMIENTO.items():
+        datos = metricas.get(metrica) or []
+        if not datos:
+            continue
+        df_temp = pd.DataFrame(datos)
+        if "timestamp" not in df_temp.columns:
+            continue
+        df_temp["timestamp"] = pd.to_numeric(df_temp["timestamp"], errors="coerce")
+        df_temp = df_temp.dropna(subset=["timestamp"])
+        df_temp["timestamp"] = df_temp["timestamp"].astype("int64")
+        df_temp = df_temp.drop_duplicates(subset=["timestamp"], keep="last")
+        df_temp = df_temp.rename(columns={v: n for v, n in renombres.items() if v in df_temp.columns})
+        columnas = ["timestamp"] + [n for n in renombres.values() if n in df_temp.columns]
+        df_temp = df_temp.reindex(columns=columnas)
+        for columna in columnas[1:]:
+            df_temp[columna] = pd.to_numeric(df_temp[columna], errors="coerce")
+        if df_sent.empty:
+            df_sent = df_temp
         else:
-            storage.escribir_csv(df_sent, out_dir / archivo_sent_nombre)
-            log_transformacion(archivo_sent_nombre, "Sin archivos fuente", 0, 0, 0, df_sent)
-
+            df_sent = pd.merge(df_sent, df_temp, on=["timestamp"], how="outer")
+    if df_sent.empty:
         return df_sent
+    df_sent = df_sent.drop_duplicates(subset=["timestamp"], keep="last")
+    return df_sent.sort_values("timestamp").reset_index(drop=True)
 
-    df_s15 = procesar_sentimiento("15m")
-    df_s12 = procesar_sentimiento("12h")
 
-    # 6 & 7. Datasets Analíticos Finales
-    def crear_dataset_analisis(df_k, df_s, tf):
-        archivo_nombre = f"dataset_analisis_{tf}.csv"
-        if df_k.empty:
-            vacio = pd.DataFrame()
-            storage.escribir_csv(vacio, out_dir / archivo_nombre)
-            log_transformacion(archivo_nombre, "Sin Klines base", 0, 0, 0, vacio)
-            return
+def _preparar_master_sentimiento(df: pd.DataFrame, symbol: str, fecha_procesamiento: str) -> pd.DataFrame:
+    if df is None or df.empty:
+        return pd.DataFrame(columns=COLUMNAS_SENTIMIENTO_MASTER)
+    df["timestamp"] = pd.to_numeric(df["timestamp"], errors="coerce")
+    df = df.dropna(subset=["timestamp"])
+    df["timestamp"] = df["timestamp"].astype("int64")
+    df = df.drop_duplicates(subset=["timestamp"], keep="last")
+    df = df.sort_values("timestamp").reset_index(drop=True)
+    df["symbol"] = symbol.upper()
+    df["fecha_utc"] = pd.to_datetime(df["timestamp"], unit="ms")
+    df["fecha_local"] = _fecha_local_desde_ms(df["timestamp"])
+    for columna in COLUMNAS_SENTIMIENTO_DATASET:
+        if columna in df.columns:
+            df[columna] = pd.to_numeric(df[columna], errors="coerce")
+    if "origen_datos" not in df.columns:
+        df["origen_datos"] = "api_sentimiento"
+    if "fecha_procesamiento" not in df.columns:
+        df["fecha_procesamiento"] = fecha_procesamiento
+    return df.reindex(columns=COLUMNAS_SENTIMIENTO_MASTER)
 
-        df_master = df_k.copy()
 
-        df_master["retorno_pct"] = (df_master["close"] / df_master["open"] - 1) * 100
-        df_master["rango_hl_pct"] = (df_master["high"] / df_master["low"] - 1) * 100
+def actualizar_master_sentimiento(symbol: str, tf: str, metricas: dict, out_dir: Path, logger, fecha_procesamiento: str) -> pd.DataFrame:
+    archivo = out_dir / f"sentimiento_{tf}_master.csv"
+    df_old = _leer_csv(archivo) if archivo.exists() else pd.DataFrame()
+    df_new = _normalizar_metricas_sentimiento(metricas)
+    if df_new.empty:
+        if df_old.empty:
+            return pd.DataFrame(columns=COLUMNAS_SENTIMIENTO_MASTER)
+        return _preparar_master_sentimiento(df_old, symbol, fecha_procesamiento)
 
-        if "quote_asset_volume" in df_master.columns and "taker_buy_quote_asset_volume" in df_master.columns:
-            df_master["taker_sell_quote_asset_volume"] = df_master["quote_asset_volume"] - df_master["taker_buy_quote_asset_volume"]
-            df_master["delta_vol_total_usd"] = df_master["quote_asset_volume"].diff()
-            df_master["delta_vol_comprador_usd"] = df_master["taker_buy_quote_asset_volume"].diff()
-            df_master["delta_vol_vendedor_usd"] = df_master["taker_sell_quote_asset_volume"].diff()
+    df_new["symbol"] = symbol.upper()
+    df_new["fecha_utc"] = pd.to_datetime(df_new["timestamp"], unit="ms")
+    df_new["fecha_local"] = _fecha_local_desde_ms(df_new["timestamp"])
+    df_new["origen_datos"] = "api_sentimiento"
+    df_new["fecha_procesamiento"] = fecha_procesamiento
+    df_new = df_new.reindex(columns=COLUMNAS_SENTIMIENTO_MASTER)
 
-        if not df_s.empty:
-            df_s_clean = df_s.drop(columns=["fecha_utc", "fecha_local", "symbol", "origen_datos", "fecha_procesamiento"], errors="ignore")
-            df_master = pd.merge(df_master, df_s_clean, left_on="open_time_ms", right_on="timestamp", how="left")
-            df_master.drop(columns=["timestamp"], inplace=True, errors="ignore")
+    if df_old.empty:
+        df_final = df_new
+    else:
+        df_old = _preparar_master_sentimiento(df_old, symbol, fecha_procesamiento)
+        df_old_idx = df_old.drop_duplicates(subset=["timestamp"], keep="last").set_index("timestamp")
+        df_new_idx = df_new.set_index("timestamp")
+        df_final = df_new_idx.combine_first(df_old_idx).reset_index()
+        df_final = df_final.sort_values("timestamp").reset_index(drop=True)
+        df_final = df_final.reindex(columns=COLUMNAS_SENTIMIENTO_MASTER)
+    storage.escribir_csv(df_final, archivo)
+    logger.info(f"[sentimiento] {symbol} {tf}: +{len(df_new)} nuevos. Total: {len(df_final)} filas.")
+    return df_final
 
-        if not df_fund.empty:
-            df_f = df_fund[["fundingTime", "fundingRate"]].dropna().sort_values("fundingTime")
-            df_master = pd.merge_asof(
-                df_master.sort_values("open_time_ms"),
-                df_f,
-                left_on="open_time_ms",
-                right_on="fundingTime",
-                direction="backward"
-            )
-            df_master.drop(columns=["fundingTime"], inplace=True, errors="ignore")
 
-        df_master["fecha_procesamiento"] = fecha_procesamiento
-        storage.escribir_csv(df_master, out_dir / archivo_nombre)
-        log_transformacion(archivo_nombre, f"Fusión total {tf}", len(df_k), 0, len(df_master), df_master)
+def construir_dataset(symbol: str, df_klines: pd.DataFrame, df_sent: pd.DataFrame, df_fund: pd.DataFrame, fecha_procesamiento: str) -> pd.DataFrame:
+    if df_klines is None or df_klines.empty:
+        return pd.DataFrame(columns=COLUMNAS_DATASET)
 
-    crear_dataset_analisis(df_k15, df_s15, "15m")
-    crear_dataset_analisis(df_k12, df_s12, "12h")
+    df = df_klines.copy()
+    df = df.sort_values("open_time_ms").reset_index(drop=True)
+    df["symbol"] = symbol.upper()
+    df["fecha_utc"] = pd.to_datetime(df["open_time_ms"], unit="ms")
+    df["fecha_local"] = _fecha_local_desde_ms(df["open_time_ms"])
+    df["origen_datos"] = "api_rest"
+    if "fecha_procesamiento" not in df.columns:
+        df["fecha_procesamiento"] = None
+    df["fecha_procesamiento"] = df["fecha_procesamiento"].fillna(fecha_procesamiento)
 
-    # Resumen general en log
-    logger.info("=========================================================================================")
-    logger.info("RESUMEN GENERAL AUDITADO (7 ARCHIVOS SALIDA)")
-    logger.info("=========================================================================================")
-    resumen_df = pd.DataFrame(resumen_salidas)
-    logger.info("\n" + resumen_df.to_string(index=False))
-    logger.info("=========================================================================================")
+    df["retorno_pct"] = (df["close"] / df["open"] - 1) * 100
+    df["rango_hl_pct"] = (df["high"] / df["low"] - 1) * 100
+    if "quote_asset_volume" in df.columns and "taker_buy_quote_asset_volume" in df.columns:
+        df["taker_sell_quote_asset_volume"] = df["quote_asset_volume"] - df["taker_buy_quote_asset_volume"]
+        df["delta_vol_total_usd"] = df["quote_asset_volume"].diff()
+        df["delta_vol_comprador_usd"] = df["taker_buy_quote_asset_volume"].diff()
+        df["delta_vol_vendedor_usd"] = df["taker_sell_quote_asset_volume"].diff()
+
+    if df_sent is not None and not df_sent.empty and "timestamp" in df_sent.columns:
+        columnas = ["timestamp"] + [c for c in COLUMNAS_SENTIMIENTO_DATASET if c in df_sent.columns]
+        df = pd.merge(df, df_sent[columnas], left_on="open_time_ms", right_on="timestamp", how="left")
+        df = df.drop(columns=["timestamp"], errors="ignore")
+
+    if df_fund is not None and not df_fund.empty and "fundingTime" in df_fund.columns:
+        df_f = df_fund[["fundingTime", "fundingRate"]].dropna().sort_values("fundingTime")
+        df = pd.merge_asof(
+            df.sort_values("open_time_ms"),
+            df_f,
+            left_on="open_time_ms",
+            right_on="fundingTime",
+            direction="backward",
+        )
+        df = df.drop(columns=["fundingTime"], errors="ignore")
+
+    return df.reindex(columns=COLUMNAS_DATASET)
+
+
+def guardar_dataset(df: pd.DataFrame, out_dir: Path, tf: str) -> Path:
+    archivo = out_dir / f"dataset_analisis_{tf}.csv"
+    storage.escribir_csv(df, archivo)
+    return archivo
+
+
+def auditar_dataset(logger, symbol: str, tf: str, filas_previas: int, filas_nuevas: int, df_dataset: pd.DataFrame):
+    filas = len(df_dataset)
+    duplicados = max(0, filas_previas + filas_nuevas - filas)
+    rango = "N/A"
+    if filas and "fecha_local" in df_dataset.columns:
+        rango = f"{df_dataset['fecha_local'].min()} -> {df_dataset['fecha_local'].max()}"
+    cobertura_sent = int(df_dataset["oi_sum_open_interest"].notna().sum()) if "oi_sum_open_interest" in df_dataset.columns else 0
+    cobertura_fund = int(df_dataset["fundingRate"].notna().sum()) if "fundingRate" in df_dataset.columns else 0
+    logger.info(f"[DATASET] {symbol} {tf}")
+    logger.info(f"  • Filas previas: {filas_previas} | Nuevas: {filas_nuevas} | Duplicadas/traslapadas: {duplicados} | Finales: {filas}")
+    logger.info(f"  • Columnas: {len(df_dataset.columns)} | Rango: {rango}")
+    logger.info(f"  • Cobertura sentimiento: {cobertura_sent} filas | Cobertura funding: {cobertura_fund} filas")

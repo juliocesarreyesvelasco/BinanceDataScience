@@ -1,21 +1,21 @@
 # Binance Vision (archivado)
 
 Este directorio conserva la descarga histórica de Klines desde `data.binance.vision`.
-**Ya no forma parte del pipeline diario.**
+**No forma parte del pipeline diario ni de la consolidación.**
 
 ## ¿Por qué se archivó?
 
-- La API REST ya reconstruyó el histórico completo de Klines y es la fuente que usa el consolidador.
-- En las pruebas, el 100% de las filas de Binance Vision estaba contenido en el archivo de la API.
+- La API REST reconstruye el histórico completo de Klines y es la fuente que usa el pipeline.
+- En las pruebas, el 100% de las filas de Binance Vision estaba contenido en la API.
 - Mantenerlo en el flujo diario obligaba a leer y desduplicar ~209.000 filas por símbolo y timeframe en cada corrida.
 
 ## ¿Cuándo usarlo?
 
-Solo para recuperación manual:
+Como respaldo manual e independiente de la API y de sus rate limits:
 
-- Si se pierde o corrompe `data/<symbol>/raw/api_rest/api_rest_klines_*.csv`.
-- Si necesitas un respaldo independiente de la API y sus rate limits.
+- Si necesitas un archivo frío de Klines históricas.
 - Si quieres reconstruir historia anterior a la que conserva la API.
+- Si la API no está disponible y necesitas descargar los ZIP mensuales.
 
 ## Uso
 
@@ -26,13 +26,14 @@ Solo para recuperación manual:
 Parámetros opcionales:
 
 - `--symbols BTCUSDT ETHUSDT`
-- `--timeframes 15m 12h`
+- `--timeframes 5m 15m 12h` (por defecto `15m` y `12h`)
 - `--years 3`
 - `--data-dir data`
 - `--pause 0`
 
-El script escribe en `data/<symbol>/raw/binance_vision/binance_vision_klines_<tf>.csv`, igual que antes.
-Es autónomo: no necesita el resto del pipeline ni credenciales de API.
+El script escribe en `data/<symbol>/raw/binance_vision/binance_vision_klines_<tf>.csv`.
+Es autónomo: no necesita credenciales de API.
 
-> Nota: los CSV que ya existen en `data/*/raw/binance_vision/` se conservan como archivo frío.
-> El consolidador actual los ignora.
+> **Importante:** el pipeline no lee estos CSV. Para incorporar su contenido a los datasets
+> habría que importarlos manualmente o volver a descargar la historia con `auth.py` (API REST).
+> Este script tampoco escribe en `raw/api_rest/`, no crea checkpoints y no siembra el pipeline.

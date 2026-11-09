@@ -2,7 +2,7 @@
 
 Este documento detalla la arquitectura técnica, lógica operativa y especificaciones de ingesta implementadas en el sistema de recolección de criptoactivos para Data Science y Modelado Predictivo.
 
-> **Alcance actual:** la ingesta usa únicamente la API REST. Binance Vision quedó archivado en `binance_vision/` como respaldo manual y las liquidaciones forzadas se descartaron del proyecto.
+> **Alcance actual:** la ingesta usa únicamente la API REST. Binance Vision quedó archivado en `binance_vision/` como respaldo manual y **no participa** en el pipeline. El sistema persiste solo **7 archivos por símbolo**: 3 datasets analíticos, 3 maestros de sentimiento y 1 maestro de funding. No se guardan Klines crudas, maestros de Klines ni checkpoints. Las liquidaciones forzadas se descartaron del proyecto.
 
 ---
 
@@ -15,14 +15,15 @@ Este documento detalla la arquitectura técnica, lógica operativa y especificac
                                └──────────────────┬─────────────────────┘
                                                   │
                                      Extracción de datos históricos y recientes
-                                     • Klines 15m y 12h
+                                     • Klines 5m, 15m y 12h
                                      • Funding Rates (cada 8h)
                                      • Ratios de sentimiento (ventana 28d)
                                                   │
                                                   ▼
                                ┌────────────────────────────────────────┐
-                               │        DATA LAKE LOCAL (raw/)          │
-                               │   Organizado por fuente y tipo         │
+                               │     ORQUESTADOR + FETCHER (en memoria) │
+                               │  • Delta calculado desde los archivos  │
+                               │  • Sin archivos crudos persistentes    │
                                └──────────────────┬─────────────────────┘
                                                   │
                                                   ▼
@@ -36,7 +37,7 @@ Este documento detalla la arquitectura técnica, lógica operativa y especificac
                                                   │
                                                   ▼
                                ┌────────────────────────────────────────┐
-                               │       7 ARCHIVOS MAESTROS CSV          │
+                               │        7 ARCHIVOS CSV POR SÍMBOLO      │
                                │           (consolidado/)               │
                                └────────────────────────────────────────┘
 ```
@@ -46,14 +47,16 @@ Este documento detalla la arquitectura técnica, lógica operativa y especificac
 - **Protocolo:** HTTPS con inyección del encabezado `X-MBX-APIKEY` y firma criptográfica HMAC-SHA256.
 - **Propósito:** obtención de Klines, tasas de fondeo y sentimiento de mercado reciente.
 - **Límites operativos:** 2,400 unidades de peso por minuto para cuentas autenticadas estándar.
-- **Restricción de ventana (sentimiento):** Binance solo permite consultar los últimos 28-30 días calendario de `openInterestHist`, `globalLongShortAccountRatio`, `topLongShortAccountRatio`, `topLongShortPositionRatio` y `takerlongshortRatio`. El pipeline captura esa ventana de forma recurrente y la acumula en el archivo local.
-- **Klines:** la API permite reconstruir varios años de historia paginando por bloques. El pipeline usa 30 días por lote para 15m y 180 días por lote para 12h.
+- **Restricción de ventana (sentimiento):** Binance solo permite consultar los últimos 28-30 días calendario de `openInterestHist`, `globalLongShortAccountRatio`, `topLongShortAccountRatio`, `topLongShortPositionRatio` y `takerlongshortRatio`. El pipeline captura esa ventana en cada corrida y la acumula en el maestro de sentimiento.
+- **Klines:** la API permite reconstruir varios años de historia paginando por bloques. El pipeline usa 30 días por lote para 5m y 15m, y 180 días por lote para 12h. Las velas se mantienen en memoria y se fusionan directamente con el dataset; no se escriben archivos crudos.
 
-### B. Binance Vision (archivado)
+### B. Binance Vision (archivado, respaldo manual)
 
-- Se conserva el script `binance_vision/backfill_vision.py` y los CSV históricos en `data/*/raw/binance_vision/`.
-- Ya no se ejecuta en el flujo diario ni se lee en la consolidación.
-- Motivo: el 100% de sus filas estaba contenido en la API y duplicaba el trabajo de lectura y desduplicación en cada corrida.
+- Se conserva el script `binance_vision/backfill_vision.py` como herramienta autónoma de recuperación.
+- Escribe únicamente `data/<symbol>/raw/binance_vision/binance_vision_klines_<tf>.csv`.
+- **No** siembra `raw/api_rest`, **no** crea checkpoints y **no** es leído por el pipeline.
+- Sus CSV son un archivo frío: si se necesitan para reconstruir historia, deben importarse manualmente o reemplazarse por una corrida de la API REST.
+- Timeframes por defecto del script: `15m` y `12h`. Para archivar `5m`, pasar `--timeframes 5m`.
 
 ### C. Liquidaciones forzadas (fuera de alcance)
 
@@ -61,36 +64,41 @@ Este documento detalla la arquitectura técnica, lógica operativa y especificac
 - El método `futures_liquidation_orders` de python-binance apunta a `/fapi/v1/forceOrders` con firma, es decir, a las órdenes forzadas de la propia cuenta, no al mercado.
 - Por decisión del proyecto, no se capturan liquidaciones ni se generan columnas relacionadas.
 
-## 2. Lógica del Pipeline y Control de Checkpoints
+## 2. Lógica del Pipeline y Estado sin Checkpoints
 
-El pipeline resuelve dos cuellos de botella: la pérdida de conexión y el bucle de re-descargas innecesarias.
+El pipeline resuelve dos cuellos de botella: la pérdida de conexión y el bucle de re-descargas innecesarias. El estado ya no se guarda en archivos JSON; se infiere de los propios CSV persistidos.
 
 - **Ejecución exclusiva:** `auth.py` adquiere un bloqueo `flock` sobre `logs/pipeline.lock`. Si ya hay otra corrida activa, aborta con un mensaje de error.
-- **Gestión de checkpoints bidireccional:** cada categoría y temporalidad mantiene un `checkpoint_<clave>.json` en `data/<symbol>/checkpoints/`. El estado registra `backfill_completado`, `ultimo_timestamp_reciente_ms` y `timestamp_mas_antiguo_ms`.
-- **Modo Backfill:** cuando `backfill_completado = False`, el orquestador itera retrospectivamente desde la fecha actual hasta hace 3 años. Al finalizar, sella la bandera en `True`.
-- **Modo Incremental:** si `backfill_completado = True`, calcula el delta desde `ultimo_timestamp_reciente_ms` hasta ahora y solicita únicamente los registros nuevos.
+- **Estado por timeframe:** el último `open_time_ms` del `dataset_analisis_<tf>.csv` define desde dónde pedir Klines nuevas. Si el dataset no existe, se solicita la ventana completa de 3 años.
+- **Estado de funding:** el último `fundingTime` del `funding_rates_master.csv` define el delta. Si el maestro no existe, se solicitan 3 años.
+- **Estado de sentimiento:** cada corrida solicita los últimos 28 días y los acumula con `combine_first` en `sentimiento_<tf>_master.csv`; no se pierde historia previa.
+- **Modo Backfill:** si el dataset no existe, o si su primer registro es posterior a la ventana de 3 años, se rellena el tramo faltante. Al finalizar, el dataset queda completo.
+- **Modo Incremental:** en corridas normales solo se solicita el delta desde el último `open_time_ms` hasta ahora.
+- **Detección de huecos internos:** en cada corrida se comparan los `open_time_ms` consecutivos contra el intervalo del timeframe. Si falta al menos una vela, se solicita el rango faltante a la API y se rellena antes de escribir. Esto permite reparar huecos históricos sin intervención manual.
 - **Pausas antifraude:** cada petición incorpora una pausa fija de 1 segundo (`PAUSA_SEGUNDOS = 1`). El consumo se mantiene muy por debajo del techo de 2,400 unidades por minuto.
+- **Tolerancia a fallos:** si falla un endpoint, se conserva el maestro correspondiente y el dataset se reconstruye con los datos disponibles. La escritura es atómica y solo ocurre si hay datos.
 
 ## 3. Matriz de Ingesta: Datos Extraídos vs Fuentes
 
 | Dataset | Granularidad | Fuente Primaria | Ventana Histórica | Estrategia de Descarga |
 | --- | --- | --- | --- | --- |
-| Klines (Velas Completas) | 15m y 12h | API REST | 3 años continuos | Paginación en lotes de 30 días (15m) y 180 días (12h) |
-| Funding Rate (Tasa Fondeo) | 8 horas | API REST (`/fapi/v1/fundingRate`) | 3 años continuos | Paginación en bloques de 120 días (hasta 1,000 registros) |
-| Open Interest Histórico | 15m y 12h | API REST (`/futures/data/openInterestHist`) | 28 días acumulados | Lotes de 7 días con `limit=500` |
-| Global Long/Short Ratio | 15m y 12h | API REST (`/futures/data/globalLongShortAccountRatio`) | 28 días acumulados | Lotes de 7 días con `limit=500` |
-| Top Trader Accounts Ratio | 15m y 12h | API REST (`/futures/data/topLongShortAccountRatio`) | 28 días acumulados | Lotes de 7 días con `limit=500` |
-| Top Trader Positions Ratio | 15m y 12h | API REST (`/futures/data/topLongShortPositionRatio`) | 28 días acumulados | Lotes de 7 días con `limit=500` |
-| Taker Long/Short Ratio | 15m y 12h | API REST (`/futures/data/takerlongshortRatio`) | 28 días acumulados | Lotes de 7 días con `limit=500` |
+| Klines (Velas Completas) | 5m, 15m y 12h | API REST | 3 años continuos | Paginación en lotes de 30 días (5m y 15m) y 180 días (12h); sin semilla Vision |
+| Funding Rate (Tasa Fondeo) | 8 horas | API REST (`/fapi/v1/fundingRate`) | 3 años continuos | Paginación en bloques de 300 días (hasta 1,000 registros) |
+| Open Interest Histórico | 5m, 15m y 12h | API REST (`/futures/data/openInterestHist`) | 28 días acumulados | Lotes por timeframe: 1 día (5m), 5 días (15m), 7 días (12h) con `limit=500` |
+| Global Long/Short Ratio | 5m, 15m y 12h | API REST (`/futures/data/globalLongShortAccountRatio`) | 28 días acumulados | Lotes por timeframe: 1 día (5m), 5 días (15m), 7 días (12h) con `limit=500` |
+| Top Trader Accounts Ratio | 5m, 15m y 12h | API REST (`/futures/data/topLongShortAccountRatio`) | 28 días acumulados | Lotes por timeframe: 1 día (5m), 5 días (15m), 7 días (12h) con `limit=500` |
+| Top Trader Positions Ratio | 5m, 15m y 12h | API REST (`/futures/data/topLongShortPositionRatio`) | 28 días acumulados | Lotes por timeframe: 1 día (5m), 5 días (15m), 7 días (12h) con `limit=500` |
+| Taker Long/Short Ratio | 5m, 15m y 12h | API REST (`/futures/data/takerlongshortRatio`) | 28 días acumulados | Lotes por timeframe: 1 día (5m), 5 días (15m), 7 días (12h) con `limit=500` |
 
 ## 4. Proceso de Consolidación y Alineación Temporal
 
-Para construir los datasets analíticos finales (`dataset_analisis_15m.csv` y `dataset_analisis_12h.csv`), el consolidador aplica estas operaciones:
+Para construir los datasets analíticos finales (`dataset_analisis_5m.csv`, `dataset_analisis_15m.csv` y `dataset_analisis_12h.csv`), el consolidador aplica estas operaciones:
 
-1. **Klines desde la API:** lee `api_rest_klines_<tf>.csv`, deduplica por `open_time_ms` y ordena. Genera `klines_<tf>_master.csv`.
-2. **Sentimiento con columnas explícitas:** antes del merge, renombra las columnas de cada métrica con prefijos (`global_ls_*`, `top_accounts_*`, `top_positions_*`, `oi_*`, `taker_*`) para evitar sufijos ambiguos `_x/_y`. Luego cruza las 5 métricas por `timestamp`.
-3. **Propagación asíncrona del Funding Rate (`merge_asof`):** el Funding Rate se cobra cada 8 horas. Mediante un cruce retrospectivo (`direction="backward"`), cada vela hereda la última tasa vigente.
-4. **Hora local:** cada archivo conserva `fecha_utc` y añade `fecha_local` en `America/Mexico_City` (ISO 8601 con offset). Las claves de cruce siguen en milisegundos UTC.
-5. **Escritura segura:** los CSV se escriben primero en un archivo temporal y luego se reemplazan de forma atómica. Si existe un lock de LibreOffice (`.~lock.<archivo>#`), la consolidación de ese símbolo se omite con una advertencia.
+1. **Estado desde el dataset:** lee `dataset_analisis_<tf>.csv` (columnas de Klines + `fecha_procesamiento`) como estado previo. No existen maestros de Klines.
+2. **Fusión de Klines nuevas:** detecta huecos internos, solicita los tramos faltantes, deduplica y ordena por `open_time_ms`, conservando la columna `fecha_procesamiento` de las filas ya existentes.
+3. **Sentimiento con columnas explícitas:** renombra las columnas de cada métrica con prefijos (`global_ls_*`, `top_accounts_*`, `top_positions_*`, `oi_*`, `taker_*`) para evitar sufijos ambiguos `_x/_y`. Cruza las 5 métricas por `timestamp`, acumula el resultado en `sentimiento_<tf>_master.csv` y luego hace un merge exacto contra `open_time_ms`.
+4. **Actualización y propagación del Funding Rate:** acumula los pagos nuevos en `funding_rates_master.csv`. Como el Funding Rate se cobra cada 8 horas, mediante un cruce retrospectivo (`merge_asof`, `direction="backward"`) cada vela hereda la última tasa vigente.
+5. **Hora local:** cada archivo conserva `fecha_utc` y añade `fecha_local` en `America/Mexico_City` (ISO 8601 con offset). Las claves de cruce siguen en milisegundos UTC.
+6. **Escritura segura:** los CSV se escriben primero en un archivo temporal y luego se reemplazan de forma atómica. Si existe un lock de LibreOffice (`.~lock.<archivo>#`), la consolidación de ese símbolo se omite con una advertencia.
 
-**Salidas:** 7 archivos maestros por símbolo (2 de Klines, 1 de Funding, 2 de Sentimiento y 2 datasets analíticos). No se generan archivos de liquidaciones.
+**Salidas:** 7 archivos por símbolo (3 datasets analíticos, 3 maestros de sentimiento y 1 maestro de funding). No se generan archivos crudos, maestros de Klines, checkpoints ni archivos de liquidaciones. Con 5 símbolos, `data/` ocupa aproximadamente 693 MB.
