@@ -1,3 +1,5 @@
+import time
+
 import requests
 
 
@@ -36,7 +38,32 @@ def obtener_funding_rates(client, symbol: str, start_ms: int, end_ms: int, logge
         return []
 
 
-def obtener_metricas_sentimiento(api_key: str, symbol: str, tf: str, start_ms: int, end_ms: int, logger) -> dict:
+def _get_sentimiento_con_reintentos(url: str, params: dict, headers: dict, logger, max_intentos: int = 3):
+    espera = 1
+    for intento in range(1, max_intentos + 1):
+        try:
+            res = requests.get(url, params=params, headers=headers, timeout=10)
+            if res.status_code == 200:
+                return res, intento
+            if res.status_code in (418, 429):
+                try:
+                    pausa = float(res.headers.get("Retry-After", espera))
+                except (TypeError, ValueError):
+                    pausa = espera
+                logger.warning(f"[api_rest_sentimiento] HTTP {res.status_code}. Reintento {intento}/{max_intentos} en {pausa}s")
+                time.sleep(pausa)
+                espera *= 2
+                continue
+            return res, intento
+        except Exception as e:
+            logger.error(f"[api_rest_sentimiento] Error: {e}. Reintento {intento}/{max_intentos}")
+            if intento < max_intentos:
+                time.sleep(espera)
+                espera *= 2
+    return None, max_intentos
+
+
+def obtener_metricas_sentimiento(api_key: str, symbol: str, tf: str, start_ms: int, end_ms: int, logger):
     metricas = {
         "open_interest": [],
         "global_ls": [],
@@ -59,16 +86,21 @@ def obtener_metricas_sentimiento(api_key: str, symbol: str, tf: str, start_ms: i
         "endTime": end_ms,
         "limit": 500
     }
+    peticiones = 0
     for clave, url in endpoints.items():
-        try:
-            res = requests.get(url, params=params, headers=headers, timeout=10)
-            if res.status_code == 200:
+        res, intentos = _get_sentimiento_con_reintentos(url, params, headers, logger)
+        peticiones += intentos
+        if res is None:
+            continue
+        if res.status_code == 200:
+            try:
                 data = res.json()
-                if isinstance(data, list):
-                    metricas[clave] = data
-            elif res.status_code != 400:
-                logger.warning(f"[api_rest_sentimiento] {clave} HTTP {res.status_code}: {res.text}")
-        except Exception as e:
-            logger.error(f"[api_rest_sentimiento] {clave} Error: {e}")
+            except ValueError:
+                logger.error(f"[api_rest_sentimiento] {clave} respuesta no JSON")
+                continue
+            if isinstance(data, list):
+                metricas[clave] = data
+        elif res.status_code != 400:
+            logger.warning(f"[api_rest_sentimiento] {clave} HTTP {res.status_code}: {res.text}")
 
-    return metricas
+    return metricas, peticiones

@@ -25,7 +25,10 @@ if not API_KEY or not API_SECRET:
 PARES = ["BNBUSDT", "BTCUSDT", "ETHUSDT", "XRPUSDT", "SOLUSDT"]
 TIMEFRAMES = ["5m", "15m", "12h"]
 DIAS_LOTE_KLINES = {"5m": 30, "15m": 30, "12h": 180}
-DIAS_LOTE_SENTIMIENTO = {"5m": 1, "15m": 5, "12h": 7}
+RETENCION_DIAS_SENTIMIENTO = 28
+PUNTOS_POR_LOTE_SENTIMIENTO = 480
+SOLAPE_PERIODOS_SENTIMIENTO = 2
+PAUSA_ENTRE_LOTES = 0.25
 PAUSA_SEGUNDOS = 1
 ANOS_HISTORIA = 3
 
@@ -81,21 +84,79 @@ def _obtener_funding_rango(client, symbol: str, start_ms: int, end_ms: int, logg
     return todos
 
 
-def _obtener_sentimiento(symbol: str, tf: str, start_ms: int, end_ms: int, logger) -> dict:
+def _fusionar_rangos(rangos: list) -> list:
+    if not rangos:
+        return []
+    ordenados = sorted((int(inicio), int(fin)) for inicio, fin in rangos)
+    fusionados = [list(ordenados[0])]
+    for inicio, fin in ordenados[1:]:
+        if inicio <= fusionados[-1][1]:
+            fusionados[-1][1] = max(fusionados[-1][1], fin)
+        else:
+            fusionados.append([inicio, fin])
+    return [(int(inicio), int(fin)) for inicio, fin in fusionados]
+
+
+def _inicio_dia_ms(ahora_utc: datetime) -> int:
+    fecha_local = ahora_utc.astimezone(consolidator.ZONA_HORARIA).date()
+    inicio_local = datetime(fecha_local.year, fecha_local.month, fecha_local.day, tzinfo=consolidator.ZONA_HORARIA)
+    return int(inicio_local.timestamp() * 1000)
+
+
+def _requiere_reconciliacion(df_master, inicio_dia_ms: int) -> bool:
+    if df_master is None or df_master.empty or "timestamp" not in df_master.columns:
+        return True
+    return int(df_master["timestamp"].max()) < inicio_dia_ms
+
+
+def _planificar_rangos_sentimiento(symbol: str, tf: str, df_master, ahora_utc: datetime, inicio_dia_ms: int, logger):
+    intervalo = consolidator.INTERVALO_MS[tf]
+    ahora_ms = int(ahora_utc.timestamp() * 1000)
+    piso = ahora_ms - RETENCION_DIAS_SENTIMIENTO * 86400000
+    solape = SOLAPE_PERIODOS_SENTIMIENTO * intervalo
+
+    if df_master is None or df_master.empty or "timestamp" not in df_master.columns:
+        return [(piso, ahora_ms)], True
+
+    ultimo = int(df_master["timestamp"].max())
+    if ultimo < piso:
+        logger.warning(
+            f"[{symbol.upper()}] {tf}: maestro de sentimiento desactualizado "
+            f"(último {ultimo} < piso {piso}); posible pérdida por retención de {RETENCION_DIAS_SENTIMIENTO} días."
+        )
+
+    if _requiere_reconciliacion(df_master, inicio_dia_ms):
+        return [(piso, ahora_ms)], True
+
+    rangos = [(max(ultimo - solape, piso), ahora_ms)]
+    for inicio_hueco, fin_hueco in consolidator.detectar_huecos_timestamps(
+        df_master, tf, desde_ms=piso, hasta_ms=ahora_ms
+    ):
+        if fin_hueco - inicio_hueco > 2 * intervalo:
+            rangos.append((inicio_hueco, fin_hueco))
+
+    return _fusionar_rangos(rangos), False
+
+
+def _obtener_sentimiento(symbol: str, tf: str, rangos: list, logger):
     acumulado = {metrica: [] for metrica in consolidator.RENOMBRES_SENTIMIENTO}
-    paso = DIAS_LOTE_SENTIMIENTO.get(tf, 7) * 86400000
-    cursor = int(start_ms)
-    while cursor < end_ms:
-        fin = min(cursor + paso, int(end_ms))
-        datos = fetcher.obtener_metricas_sentimiento(API_KEY, symbol, tf, cursor, fin, logger)
-        for metrica, lista in datos.items():
-            if metrica in acumulado:
-                acumulado[metrica].extend(lista)
-        if fin <= cursor:
-            break
-        cursor = fin
-        time.sleep(PAUSA_SEGUNDOS)
-    return acumulado
+    intervalo = consolidator.INTERVALO_MS[tf]
+    lote_ms = PUNTOS_POR_LOTE_SENTIMIENTO * intervalo
+    peticiones = 0
+    for inicio_ms, fin_ms in rangos:
+        cursor = int(inicio_ms)
+        while cursor < int(fin_ms):
+            fin = min(cursor + lote_ms, int(fin_ms))
+            datos, intentos = fetcher.obtener_metricas_sentimiento(API_KEY, symbol, tf, cursor, fin, logger)
+            peticiones += intentos
+            for metrica, lista in datos.items():
+                if metrica in acumulado:
+                    acumulado[metrica].extend(lista)
+            if fin <= cursor:
+                break
+            cursor = fin
+            time.sleep(PAUSA_ENTRE_LOTES)
+    return acumulado, peticiones
 
 
 def main(symbols=None, data_dir=None):
@@ -119,6 +180,7 @@ def main(symbols=None, data_dir=None):
     ahora_utc = datetime.now(timezone.utc)
     fecha_fin_ms = int(ahora_utc.timestamp() * 1000)
     fecha_inicio_global_ms = int((ahora_utc - timedelta(days=365 * ANOS_HISTORIA)).timestamp() * 1000)
+    inicio_dia_ms = _inicio_dia_ms(ahora_utc)
 
     for symbol in symbols:
         symbol_dir = base_data / symbol.lower()
@@ -172,8 +234,20 @@ def main(symbols=None, data_dir=None):
             filas_nuevas = len(df_nuevos)
             df_klines = consolidator.combinar_klines(df_old, df_nuevos)
 
-            metricas = _obtener_sentimiento(symbol, tf, fecha_fin_ms - 28 * 86400000, fecha_fin_ms, logger)
-            df_sent = consolidator.actualizar_master_sentimiento(symbol, tf, metricas, out_dir, cons_logger, fecha_procesamiento)
+            df_sent_old = consolidator.cargar_master_sentimiento(out_dir, tf)
+            rangos_sent, recuperacion_sent = _planificar_rangos_sentimiento(
+                symbol, tf, df_sent_old, ahora_utc, inicio_dia_ms, logger
+            )
+            metricas, peticiones_sent = _obtener_sentimiento(symbol, tf, rangos_sent, logger)
+            df_sent, stats_sent = consolidator.actualizar_master_sentimiento(
+                symbol, tf, metricas, out_dir, cons_logger, fecha_procesamiento, df_old=df_sent_old
+            )
+            cons_logger.info(
+                f"[sentimiento] {symbol} {tf}: modo={'recuperacion' if recuperacion_sent else 'incremental'} "
+                f"rangos={rangos_sent} peticiones={peticiones_sent} "
+                f"nuevos={stats_sent['nuevos_reales']} actualizados={stats_sent['actualizados']} "
+                f"escritura={'si' if stats_sent['written'] else 'no'}"
+            )
 
             df_dataset = consolidator.construir_dataset(symbol, df_klines, df_sent, df_fund, fecha_procesamiento)
             if df_dataset.empty:

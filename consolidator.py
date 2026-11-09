@@ -3,6 +3,7 @@ from datetime import datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
+import numpy as np
 import pandas as pd
 
 import storage
@@ -172,6 +173,35 @@ def detectar_huecos(df: pd.DataFrame, tf: str) -> list[tuple[int, int]]:
     return huecos
 
 
+def detectar_huecos_timestamps(df: pd.DataFrame, tf: str, desde_ms=None, hasta_ms=None) -> list[tuple[int, int]]:
+    intervalo = INTERVALO_MS.get(tf)
+    if intervalo is None or df is None or len(df) == 0 or "timestamp" not in df.columns:
+        return []
+    tiempos = df["timestamp"].astype("int64").sort_values().reset_index(drop=True)
+    huecos = []
+
+    if len(tiempos) >= 2:
+        diferencias = tiempos.diff()
+        for indice in diferencias[diferencias > intervalo].index:
+            anterior = int(tiempos.iloc[indice - 1])
+            actual = int(tiempos.iloc[indice])
+            inicio = anterior + intervalo
+            if inicio >= actual:
+                continue
+            inicio_recortado = max(inicio, int(desde_ms)) if desde_ms is not None else inicio
+            fin_recortado = min(actual, int(hasta_ms)) if hasta_ms is not None else actual
+            if inicio_recortado < fin_recortado:
+                huecos.append((inicio_recortado, fin_recortado))
+
+    if desde_ms is not None:
+        primero = int(tiempos.iloc[0])
+        if primero > int(desde_ms) + intervalo:
+            fin = min(primero, int(hasta_ms)) if hasta_ms is not None else primero
+            if int(desde_ms) < fin:
+                huecos.append((int(desde_ms), fin))
+    return huecos
+
+
 def combinar_klines(df_old: pd.DataFrame, df_nuevos: pd.DataFrame) -> pd.DataFrame:
     partes = [d for d in (df_old, df_nuevos) if d is not None and not d.empty]
     if not partes:
@@ -241,6 +271,24 @@ def actualizar_master_funding(symbol: str, nuevos: list, out_dir: Path, logger, 
     return df_final
 
 
+def cargar_master_sentimiento(out_dir: Path, tf: str) -> pd.DataFrame:
+    archivo = out_dir / f"sentimiento_{tf}_master.csv"
+    if not archivo.exists():
+        return pd.DataFrame(columns=COLUMNAS_SENTIMIENTO_MASTER)
+    df = _leer_csv(archivo)
+    if df.empty or "timestamp" not in df.columns:
+        return pd.DataFrame(columns=COLUMNAS_SENTIMIENTO_MASTER)
+    df["timestamp"] = pd.to_numeric(df["timestamp"], errors="coerce")
+    df = df.dropna(subset=["timestamp"])
+    df["timestamp"] = df["timestamp"].astype("int64")
+    df = df.drop_duplicates(subset=["timestamp"], keep="last")
+    df = df.sort_values("timestamp").reset_index(drop=True)
+    for columna in COLUMNAS_SENTIMIENTO_DATASET:
+        if columna in df.columns:
+            df[columna] = pd.to_numeric(df[columna], errors="coerce")
+    return df.reindex(columns=COLUMNAS_SENTIMIENTO_MASTER)
+
+
 def _normalizar_metricas_sentimiento(metricas: dict) -> pd.DataFrame:
     df_sent = pd.DataFrame()
     for metrica, renombres in RENOMBRES_SENTIMIENTO.items():
@@ -290,14 +338,49 @@ def _preparar_master_sentimiento(df: pd.DataFrame, symbol: str, fecha_procesamie
     return df.reindex(columns=COLUMNAS_SENTIMIENTO_MASTER)
 
 
-def actualizar_master_sentimiento(symbol: str, tf: str, metricas: dict, out_dir: Path, logger, fecha_procesamiento: str) -> pd.DataFrame:
+def _contar_nuevos_sentimiento(df_old: pd.DataFrame, df_new: pd.DataFrame) -> int:
+    if df_new is None or df_new.empty:
+        return 0
+    ts_new = set(df_new["timestamp"].tolist())
+    if df_old is None or df_old.empty:
+        return len(ts_new)
+    ts_old = set(df_old["timestamp"].tolist())
+    return len(ts_new - ts_old)
+
+
+def _contar_actualizados_sentimiento(df_old: pd.DataFrame, df_final: pd.DataFrame) -> int:
+    if df_old is None or df_old.empty or df_final is None or df_final.empty:
+        return 0
+    columnas = [c for c in COLUMNAS_SENTIMIENTO_DATASET if c in df_old.columns and c in df_final.columns]
+    if not columnas:
+        return 0
+    viejo = df_old.drop_duplicates(subset=["timestamp"], keep="last").set_index("timestamp")
+    final = df_final.drop_duplicates(subset=["timestamp"], keep="last").set_index("timestamp")
+    comunes = final.index.intersection(viejo.index)
+    if len(comunes) == 0:
+        return 0
+    matriz_vieja = viejo.loc[comunes, columnas].to_numpy(dtype=float)
+    matriz_final = final.loc[comunes, columnas].to_numpy(dtype=float)
+    with np.errstate(invalid="ignore"):
+        distintos = ~np.isclose(matriz_vieja, matriz_final, rtol=0.0, atol=0.0, equal_nan=True)
+    return int(distintos.any(axis=1).sum())
+
+
+def actualizar_master_sentimiento(symbol: str, tf: str, metricas: dict, out_dir: Path, logger, fecha_procesamiento: str, df_old: pd.DataFrame = None):
     archivo = out_dir / f"sentimiento_{tf}_master.csv"
-    df_old = _leer_csv(archivo) if archivo.exists() else pd.DataFrame()
+    if df_old is None:
+        df_old = cargar_master_sentimiento(out_dir, tf)
     df_new = _normalizar_metricas_sentimiento(metricas)
     if df_new.empty:
         if df_old.empty:
-            return pd.DataFrame(columns=COLUMNAS_SENTIMIENTO_MASTER)
-        return _preparar_master_sentimiento(df_old, symbol, fecha_procesamiento)
+            df_final = pd.DataFrame(columns=COLUMNAS_SENTIMIENTO_MASTER)
+            stats = {"nuevos_reales": 0, "actualizados": 0, "total": 0, "written": False}
+            return df_final, stats
+        df_final = _preparar_master_sentimiento(df_old, symbol, fecha_procesamiento)
+        stats = {"nuevos_reales": 0, "actualizados": 0, "total": len(df_final), "written": False}
+        return df_final, stats
+
+    nuevos_reales = _contar_nuevos_sentimiento(df_old, df_new)
 
     df_new["symbol"] = symbol.upper()
     df_new["fecha_utc"] = pd.to_datetime(df_new["timestamp"], unit="ms")
@@ -315,9 +398,16 @@ def actualizar_master_sentimiento(symbol: str, tf: str, metricas: dict, out_dir:
         df_final = df_new_idx.combine_first(df_old_idx).reset_index()
         df_final = df_final.sort_values("timestamp").reset_index(drop=True)
         df_final = df_final.reindex(columns=COLUMNAS_SENTIMIENTO_MASTER)
-    storage.escribir_csv(df_final, archivo)
-    logger.info(f"[sentimiento] {symbol} {tf}: +{len(df_new)} nuevos. Total: {len(df_final)} filas.")
-    return df_final
+
+    actualizados = _contar_actualizados_sentimiento(df_old, df_final)
+    stats = {"nuevos_reales": nuevos_reales, "actualizados": actualizados, "total": len(df_final), "written": False}
+    if nuevos_reales > 0 or actualizados > 0:
+        storage.escribir_csv(df_final, archivo)
+        stats["written"] = True
+        logger.info(f"[sentimiento] {symbol} {tf}: +{nuevos_reales} nuevos, {actualizados} actualizados. Total: {len(df_final)} filas.")
+    else:
+        logger.info(f"[sentimiento] {symbol} {tf}: sin cambios. Total: {len(df_final)} filas.")
+    return df_final, stats
 
 
 def construir_dataset(symbol: str, df_klines: pd.DataFrame, df_sent: pd.DataFrame, df_fund: pd.DataFrame, fecha_procesamiento: str) -> pd.DataFrame:

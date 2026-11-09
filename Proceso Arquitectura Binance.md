@@ -47,7 +47,7 @@ Este documento detalla la arquitectura técnica, lógica operativa y especificac
 - **Protocolo:** HTTPS con inyección del encabezado `X-MBX-APIKEY` y firma criptográfica HMAC-SHA256.
 - **Propósito:** obtención de Klines, tasas de fondeo y sentimiento de mercado reciente.
 - **Límites operativos:** 2,400 unidades de peso por minuto para cuentas autenticadas estándar.
-- **Restricción de ventana (sentimiento):** Binance solo permite consultar los últimos 28-30 días calendario de `openInterestHist`, `globalLongShortAccountRatio`, `topLongShortAccountRatio`, `topLongShortPositionRatio` y `takerlongshortRatio`. El pipeline captura esa ventana en cada corrida y la acumula en el maestro de sentimiento.
+- **Restricción de ventana (sentimiento):** Binance solo permite consultar los últimos 28-30 días calendario de `openInterestHist`, `globalLongShortAccountRatio`, `topLongShortAccountRatio`, `topLongShortPositionRatio` y `takerlongshortRatio`. El pipeline ingesta el delta desde el último `timestamp` del maestro (con solape de 2 periodos y piso en 28 días) y lo acumula; una vez por semana re-pide la ventana completa para reconciliar.
 - **Klines:** la API permite reconstruir varios años de historia paginando por bloques. El pipeline usa 30 días por lote para 5m y 15m, y 180 días por lote para 12h. Las velas se mantienen en memoria y se fusionan directamente con el dataset; no se escriben archivos crudos.
 
 ### B. Binance Vision (archivado, respaldo manual)
@@ -71,12 +71,12 @@ El pipeline resuelve dos cuellos de botella: la pérdida de conexión y el bucle
 - **Ejecución exclusiva:** `auth.py` adquiere un bloqueo `flock` sobre `logs/pipeline.lock`. Si ya hay otra corrida activa, aborta con un mensaje de error.
 - **Estado por timeframe:** el último `open_time_ms` del `dataset_analisis_<tf>.csv` define desde dónde pedir Klines nuevas. Si el dataset no existe, se solicita la ventana completa de 3 años.
 - **Estado de funding:** el último `fundingTime` del `funding_rates_master.csv` define el delta. Si el maestro no existe, se solicitan 3 años.
-- **Estado de sentimiento:** cada corrida solicita los últimos 28 días y los acumula con `combine_first` en `sentimiento_<tf>_master.csv`; no se pierde historia previa.
+- **Estado de sentimiento:** el último `timestamp` de `sentimiento_<tf>_master.csv` define el delta. Cada corrida solicita desde `max(timestamp) - 2*intervalo` (con piso en `ahora - 28 días`), detecta y repara huecos dentro de la retención, y hace upsert con `combine_first`. En la **primera corrida de cada día** (medianoche local) se re-pide la ventana completa de 28 días como recuperación; las corridas siguientes del mismo día son incrementales.
 - **Modo Backfill:** si el dataset no existe, o si su primer registro es posterior a la ventana de 3 años, se rellena el tramo faltante. Al finalizar, el dataset queda completo.
 - **Modo Incremental:** en corridas normales solo se solicita el delta desde el último `open_time_ms` hasta ahora.
 - **Detección de huecos internos:** en cada corrida se comparan los `open_time_ms` consecutivos contra el intervalo del timeframe. Si falta al menos una vela, se solicita el rango faltante a la API y se rellena antes de escribir. Esto permite reparar huecos históricos sin intervención manual.
-- **Pausas antifraude:** cada petición incorpora una pausa fija de 1 segundo (`PAUSA_SEGUNDOS = 1`). El consumo se mantiene muy por debajo del techo de 2,400 unidades por minuto.
-- **Tolerancia a fallos:** si falla un endpoint, se conserva el maestro correspondiente y el dataset se reconstruye con los datos disponibles. La escritura es atómica y solo ocurre si hay datos.
+- **Pausas antifraude:** Klines y funding usan 1 segundo entre lotes (`PAUSA_SEGUNDOS = 1`); sentimiento usa 0.25 s entre lotes (`PAUSA_ENTRE_LOTES`) y backoff exponencial solo ante HTTP 418/429. El consumo se mantiene muy por debajo del techo de 2,400 unidades por minuto.
+- **Tolerancia a fallos:** si falla un endpoint, se conserva el maestro correspondiente y el dataset se reconstruye con los datos disponibles. Sentimiento reintenta con backoff y, si persiste el fallo, `combine_first` conserva el valor previo. La escritura es atómica y solo ocurre si hay datos nuevos o corregidos.
 
 ## 3. Matriz de Ingesta: Datos Extraídos vs Fuentes
 
@@ -84,11 +84,11 @@ El pipeline resuelve dos cuellos de botella: la pérdida de conexión y el bucle
 | --- | --- | --- | --- | --- |
 | Klines (Velas Completas) | 5m, 15m y 12h | API REST | 3 años continuos | Paginación en lotes de 30 días (5m y 15m) y 180 días (12h); sin semilla Vision |
 | Funding Rate (Tasa Fondeo) | 8 horas | API REST (`/fapi/v1/fundingRate`) | 3 años continuos | Paginación en bloques de 300 días (hasta 1,000 registros) |
-| Open Interest Histórico | 5m, 15m y 12h | API REST (`/futures/data/openInterestHist`) | 28 días acumulados | Lotes por timeframe: 1 día (5m), 5 días (15m), 7 días (12h) con `limit=500` |
-| Global Long/Short Ratio | 5m, 15m y 12h | API REST (`/futures/data/globalLongShortAccountRatio`) | 28 días acumulados | Lotes por timeframe: 1 día (5m), 5 días (15m), 7 días (12h) con `limit=500` |
-| Top Trader Accounts Ratio | 5m, 15m y 12h | API REST (`/futures/data/topLongShortAccountRatio`) | 28 días acumulados | Lotes por timeframe: 1 día (5m), 5 días (15m), 7 días (12h) con `limit=500` |
-| Top Trader Positions Ratio | 5m, 15m y 12h | API REST (`/futures/data/topLongShortPositionRatio`) | 28 días acumulados | Lotes por timeframe: 1 día (5m), 5 días (15m), 7 días (12h) con `limit=500` |
-| Taker Long/Short Ratio | 5m, 15m y 12h | API REST (`/futures/data/takerlongshortRatio`) | 28 días acumulados | Lotes por timeframe: 1 día (5m), 5 días (15m), 7 días (12h) con `limit=500` |
+| Open Interest Histórico | 5m, 15m y 12h | API REST (`/futures/data/openInterestHist`) | 28 días acumulados | Incremental + huecos; lotes de 480 puntos (~1.67 días en 5m, 5 días en 15m, 1 bloque en 12h) con `limit=500` |
+| Global Long/Short Ratio | 5m, 15m y 12h | API REST (`/futures/data/globalLongShortAccountRatio`) | 28 días acumulados | Incremental + huecos; lotes de 480 puntos (~1.67 días en 5m, 5 días en 15m, 1 bloque en 12h) con `limit=500` |
+| Top Trader Accounts Ratio | 5m, 15m y 12h | API REST (`/futures/data/topLongShortAccountRatio`) | 28 días acumulados | Incremental + huecos; lotes de 480 puntos (~1.67 días en 5m, 5 días en 15m, 1 bloque en 12h) con `limit=500` |
+| Top Trader Positions Ratio | 5m, 15m y 12h | API REST (`/futures/data/topLongShortPositionRatio`) | 28 días acumulados | Incremental + huecos; lotes de 480 puntos (~1.67 días en 5m, 5 días en 15m, 1 bloque en 12h) con `limit=500` |
+| Taker Long/Short Ratio | 5m, 15m y 12h | API REST (`/futures/data/takerlongshortRatio`) | 28 días acumulados | Incremental + huecos; lotes de 480 puntos (~1.67 días en 5m, 5 días en 15m, 1 bloque en 12h) con `limit=500` |
 
 ## 4. Proceso de Consolidación y Alineación Temporal
 

@@ -69,7 +69,7 @@ Las Klines ya no se guardan por separado: estas columnas forman la base de cada 
 
 ### C. Tablas de Sentimiento (`sentimiento_5m_master.csv`, `sentimiento_15m_master.csv`, `sentimiento_12h_master.csv`)
 
-Las columnas se renombraron con prefijos por métrica para eliminar la ambigüedad que generaba el merge (`longAccount_x`, `longAccount_y`, etc.). El maestro acumula la ventana de 28 días de cada corrida y conserva la historia previa.
+Las columnas se renombraron con prefijos por métrica para eliminar la ambigüedad que generaba el merge (`longAccount_x`, `longAccount_y`, etc.). El maestro se actualiza por **upsert por `timestamp`**: cada corrida pide solo el delta desde el último registro (más un solape de 2 periodos), repara huecos dentro de la retención de 28 días y conserva la historia previa. El CSV solo se reescribe si hay timestamps nuevos o valores corregidos.
 
 | Columna | Tipo de Dato | Unidad | Nullable | Descripción y Regla de Negocio |
 | :--- | :--- | :--- | :--- | :--- |
