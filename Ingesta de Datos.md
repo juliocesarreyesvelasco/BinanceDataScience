@@ -2,12 +2,13 @@
 
 **Arquitectura del Sistema**
 
-El sistema opera mediante una arquitectura modular de cuatro componentes. La ingesta usa únicamente la API REST de Binance; Binance Vision quedó archivado como herramienta manual de recuperación y no participa en el pipeline. Las liquidaciones forzadas están fuera del alcance. Solo se persisten **7 archivos por símbolo**: 3 datasets analíticos, 3 maestros de sentimiento y 1 maestro de funding.
+El sistema opera mediante una arquitectura modular de cinco componentes. La ingesta usa únicamente la API REST de Binance; Binance Vision quedó archivado como herramienta manual de recuperación y no participa en el pipeline. Las liquidaciones forzadas están fuera del alcance. Solo se persisten **7 archivos por símbolo**: 3 datasets analíticos, 3 maestros de sentimiento y 1 maestro de funding.
 
 1. **Orquestador (`auth.py`)**: coordina los ciclos temporales, protege el pipeline con un bloqueo de ejecución (`flock`), gestiona las pausas para respetar los límites de la API, planifica el delta de sentimiento y calcula el delta con base en los archivos persistidos.
 2. **Motor de Extracción (`fetcher.py`)**: ejecuta las peticiones HTTP a la API REST para Klines, Funding Rates y métricas de sentimiento, con reintentos y backoff exponencial ante HTTP 418/429.
 3. **Almacenamiento (`storage.py`)**: centraliza la escritura atómica de CSV (archivo temporal + `os.replace`) y la detección de locks de LibreOffice. No gestiona JSON ni checkpoints.
 4. **Consolidador (`consolidator.py`)**: fusiona Klines nuevas con el dataset previo, acumula los maestros de sentimiento y funding, calcula variables derivadas y entrega los datasets listos para Machine Learning. Añade `fecha_local` en hora de Ciudad de México junto a `fecha_utc`.
+5. **Exportador (`export_outputs.py`)**: genera copias reducidas de los datasets en `outputs/` para análisis con IA. `auth.py` lo ejecuta automáticamente al final de la ingesta; es de solo lectura sobre `data/` y no altera el estado operativo.
 
 **Lógica de Extracción y Control de Estado**
 
@@ -38,6 +39,13 @@ data/
         ├── sentimiento_15m_master.csv
         ├── sentimiento_12h_master.csv
         └── funding_rates_master.csv
+
+outputs/                        # regenerado automáticamente por auth.py (no operativo)
+├── _resumen.csv
+└── btcusdt/
+    ├── dataset_analisis_5m.csv
+    ├── dataset_analisis_15m.csv
+    └── dataset_analisis_12h.csv
 ```
 
 > No existen `raw/`, `checkpoints/` ni maestros de Klines en el flujo operativo. Si se usa `binance_vision/backfill_vision.py` manualmente, se crea `data/<symbol>/raw/binance_vision/` como archivo frío, ajeno al pipeline.
@@ -80,3 +88,32 @@ El maestro de sentimiento se actualiza de forma **incremental**, no con la venta
 - **Métrica de log:** `rangos`, `peticiones`, `nuevos`, `actualizados` y si hubo `escritura`. `nuevos` cuenta timestamps realmente nuevos, no filas re-descargadas.
 
 Impacto medido (corrida diaria, por símbolo): de ~190 peticiones y 35 s de pausa a ~15 peticiones y ~0.75 s. El arranque en frío de 5m baja de 140 a 85 peticiones.
+
+## Exportación para análisis con IA (`export_outputs.py`)
+
+`export_outputs.py` no escribe en `data/`. Su función es producir copias reducidas de los datasets en `outputs/<symbol>/` para que un modelo de lenguaje pueda analizarlas dentro de un presupuesto de contexto. El directorio `outputs/` está ignorado por Git.
+
+**Integración con la ingesta:** al finalizar cada corrida, `auth.py` invoca la exportación automáticamente para los símbolos que efectivamente escribieron al menos un dataset. La exportación se ejecuta después de liberar la escritura de los CSV y no forma parte de la consolidación. Si falla, el error se registra en `logs/proceso.log` y la ingesta se conserva como exitosa. Se puede desactivar con `--sin-export`.
+
+**Presupuesto:** 16,000 tokens por archivo, margen del 95% y una heurística conservadora de 3 caracteres por token. Invocado desde `auth.py`, procesa solo los símbolos de esa corrida; ejecutado de forma independiente, descubre todos los símbolos de `data/`. En ambos casos escribe `outputs/_resumen.csv` con filas, tokens y rango temporal de cada archivo.
+
+**Preset compacto (default):** reduce de 38 a 17 columnas. Elimina columnas constantes (`symbol`, `origen_datos`, `fecha_procesamiento`), redundantes (`fecha_utc`, `open_time_ms`, `close_time_ms`), casi constantes (`oi_cmc_circulating_supply`), lados complementarios de los ratios y los `delta_vol_*` (dejan de ser válidos al muestrear). Se conserva `fecha_local` en lugar de `fecha_utc`.
+
+```text
+fecha_local, open, high, low, close, volume, quote_asset_volume,
+number_of_trades, taker_buy_quote_asset_volume, retorno_pct, rango_hl_pct,
+oi_value_usd, global_ls_ratio, top_accounts_ratio, top_positions_ratio,
+taker_buy_sell_ratio, fundingRate
+```
+
+**Muestreo híbrido:** las velas más recientes se conservan a resolución nativa (bloque denso) y el histórico anterior se muestrea cada `bucket` velas (bloque disperso). El resultado se escribe en orden ascendente y sin duplicados.
+
+| Timeframe | Bloque denso | Bucket del histórico | Cobertura típica |
+| --- | --- | --- | --- |
+| 5m | últimas 8 horas (~97 velas) | 1 de cada 12 (1 por hora) | ~6 días |
+| 15m | 60% del presupuesto | 1 de cada 4 (1 por hora) | ~5 días |
+| 12h | 60% del presupuesto | nativo (1 de cada 1) | ~4 meses |
+
+La ventana densa de 5m se ancla al último `open_time_ms` disponible, no al reloj, para no perder velas si la ingesta lleva retraso. La última vela en formación se excluye salvo que se pase `--incluir-vela-en-formacion`.
+
+**Flags principales:** `--preset {compact,full}`, `--columnas`, `--share-reciente`, `--ventana-reciente`, `--bucket-viejo`, `--token-limit`, `--bytes-cola` (2 MiB por defecto; solo se lee la cola del CSV, nunca el archivo completo). El orquestador acepta `--sin-export` para omitir esta etapa.

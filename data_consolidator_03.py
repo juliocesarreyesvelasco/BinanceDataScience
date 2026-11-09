@@ -1,12 +1,10 @@
-import logging
-from datetime import datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
 import numpy as np
 import pandas as pd
 
-import storage
+import core_storage_04 as storage
 
 ZONA_HORARIA = ZoneInfo("America/Mexico_City")
 
@@ -82,20 +80,6 @@ COLUMNAS_DATASET = [
     *COLUMNAS_SENTIMIENTO_DATASET,
     "fundingRate",
 ]
-
-
-def setup_consolidator_logger(log_dir: Path):
-    c_logger = logging.getLogger("consolidator_audit")
-    if not c_logger.handlers:
-        c_logger.setLevel(logging.INFO)
-        fh = logging.FileHandler(log_dir / "consolidacion.log", encoding="utf-8")
-        formatter = logging.Formatter("%(asctime)s - %(levelname)s - %(message)s")
-        fh.setFormatter(formatter)
-        ch = logging.StreamHandler()
-        ch.setFormatter(formatter)
-        c_logger.addHandler(fh)
-        c_logger.addHandler(ch)
-    return c_logger
 
 
 def _fecha_local_desde_ms(serie_ms: pd.Series) -> pd.Series:

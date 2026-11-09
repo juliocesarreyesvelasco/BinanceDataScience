@@ -12,4 +12,5 @@ __pycache__/
 # Datos y logs generados por el pipeline
 data/
 logs/
+outputs/
 Bitacora_Refactor_*.md

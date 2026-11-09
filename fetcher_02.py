@@ -1,5 +1,4 @@
 import time
-
 import requests
 
 
@@ -38,11 +37,11 @@ def obtener_funding_rates(client, symbol: str, start_ms: int, end_ms: int, logge
         return []
 
 
-def _get_sentimiento_con_reintentos(url: str, params: dict, headers: dict, logger, max_intentos: int = 3):
+def _get_sentimiento_con_reintentos(session: requests.Session, url: str, params: dict, headers: dict, logger, max_intentos: int = 3):
     espera = 1
     for intento in range(1, max_intentos + 1):
         try:
-            res = requests.get(url, params=params, headers=headers, timeout=10)
+            res = session.get(url, params=params, headers=headers, timeout=10)
             if res.status_code == 200:
                 return res, intento
             if res.status_code in (418, 429):
@@ -63,7 +62,7 @@ def _get_sentimiento_con_reintentos(url: str, params: dict, headers: dict, logge
     return None, max_intentos
 
 
-def obtener_metricas_sentimiento(api_key: str, symbol: str, tf: str, start_ms: int, end_ms: int, logger):
+def obtener_metricas_sentimiento(session: requests.Session, api_key: str, symbol: str, tf: str, start_ms: int, end_ms: int, logger):
     metricas = {
         "open_interest": [],
         "global_ls": [],
@@ -88,7 +87,7 @@ def obtener_metricas_sentimiento(api_key: str, symbol: str, tf: str, start_ms: i
     }
     peticiones = 0
     for clave, url in endpoints.items():
-        res, intentos = _get_sentimiento_con_reintentos(url, params, headers, logger)
+        res, intentos = _get_sentimiento_con_reintentos(session, url, params, headers, logger)
         peticiones += intentos
         if res is None:
             continue

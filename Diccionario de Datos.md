@@ -118,3 +118,31 @@ Además de las columnas de Klines (sección A), cada dataset integra el sentimie
 - El pipeline detecta huecos internos de Klines y los rellena en la siguiente corrida. El hueco de `2026-10-28` en 5m ya fue reparado.
 - `fecha_local` se conserva en el dataset para análisis y presentación; las claves de cruce siguen siendo `open_time_ms` y `timestamp` en milisegundos UTC.
 - El sentimiento solo se alinea cuando existe una vela con el mismo `open_time_ms`. Los snapshots de sentimiento sin vela correspondiente permanecen en el maestro, pero no se incorporan al dataset.
+
+---
+
+## 3. Subconjunto exportado para IA (`outputs/`)
+
+`export_outputs.py` genera copias reducidas de los datasets en `outputs/<symbol>/` con fines de análisis por un modelo de lenguaje. Estas copias **no son archivos de negocio**: no se consolidan, no se usan como estado y están ignoradas por Git. `auth.py` regenera este subconjunto automáticamente al finalizar la ingesta para los símbolos procesados; la exportación es no bloqueante y puede desactivarse con `--sin-export`.
+
+El preset compacto (default) conserva 17 de las 38 columnas, en este orden:
+
+```text
+fecha_local, open, high, low, close, volume, quote_asset_volume,
+number_of_trades, taker_buy_quote_asset_volume, retorno_pct, rango_hl_pct,
+oi_value_usd, global_ls_ratio, top_accounts_ratio, top_positions_ratio,
+taker_buy_sell_ratio, fundingRate
+```
+
+Columnas excluidas y motivo:
+
+| Columnas | Motivo |
+| --- | --- |
+| `symbol`, `origen_datos`, `fecha_procesamiento` | Constantes; el símbolo se infiere de la ruta. |
+| `fecha_utc`, `open_time_ms`, `close_time_ms` | Redundantes con `fecha_local` y el timeframe; se usa `fecha_local` como referencia. |
+| `oi_cmc_circulating_supply` | Prácticamente constante en la ventana. |
+| `global_ls_long/short_account`, `top_accounts_long/short_account`, `top_positions_long/short_account` | Complementarios; se conserva el `ratio`. |
+| `taker_sell_quote_asset_volume` | Derivable de `quote_asset_volume - taker_buy_quote_asset_volume`. |
+| `delta_vol_*` | El `diff` deja de ser válido cuando la serie se muestrea. |
+
+El muestreo híbrido conserva las velas recientes a resolución nativa y muestrea el histórico anterior: 1 de cada 12 velas en 5m, 1 de cada 4 en 15m y nativo en 12h. La ventana densa de 5m son las últimas 8 horas. Cada archivo se limita a ~16,000 tokens estimados.

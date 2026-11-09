@@ -47,7 +47,7 @@ Este documento detalla la arquitectura técnica, lógica operativa y especificac
 - **Protocolo:** HTTPS con inyección del encabezado `X-MBX-APIKEY` y firma criptográfica HMAC-SHA256.
 - **Propósito:** obtención de Klines, tasas de fondeo y sentimiento de mercado reciente.
 - **Límites operativos:** 2,400 unidades de peso por minuto para cuentas autenticadas estándar.
-- **Restricción de ventana (sentimiento):** Binance solo permite consultar los últimos 28-30 días calendario de `openInterestHist`, `globalLongShortAccountRatio`, `topLongShortAccountRatio`, `topLongShortPositionRatio` y `takerlongshortRatio`. El pipeline ingesta el delta desde el último `timestamp` del maestro (con solape de 2 periodos y piso en 28 días) y lo acumula; una vez por semana re-pide la ventana completa para reconciliar.
+- **Restricción de ventana (sentimiento):** Binance solo permite consultar los últimos 28-30 días calendario de `openInterestHist`, `globalLongShortAccountRatio`, `topLongShortAccountRatio`, `topLongShortPositionRatio` y `takerlongshortRatio`. El pipeline ingesta el delta desde el último `timestamp` del maestro (con solape de 2 periodos y piso en 28 días) y lo acumula; en la primera corrida de cada día re-pide la ventana completa para reconciliar.
 - **Klines:** la API permite reconstruir varios años de historia paginando por bloques. El pipeline usa 30 días por lote para 5m y 15m, y 180 días por lote para 12h. Las velas se mantienen en memoria y se fusionan directamente con el dataset; no se escriben archivos crudos.
 
 ### B. Binance Vision (archivado, respaldo manual)
@@ -102,3 +102,28 @@ Para construir los datasets analíticos finales (`dataset_analisis_5m.csv`, `dat
 6. **Escritura segura:** los CSV se escriben primero en un archivo temporal y luego se reemplazan de forma atómica. Si existe un lock de LibreOffice (`.~lock.<archivo>#`), la consolidación de ese símbolo se omite con una advertencia.
 
 **Salidas:** 7 archivos por símbolo (3 datasets analíticos, 3 maestros de sentimiento y 1 maestro de funding). No se generan archivos crudos, maestros de Klines, checkpoints ni archivos de liquidaciones. Con 5 símbolos, `data/` ocupa aproximadamente 693 MB.
+
+---
+
+## 5. Capa de exportación para análisis con IA
+
+`export_outputs.py` es una herramienta **de solo lectura sobre `data/`** que produce copias reducidas en `outputs/<symbol>/` para alimentar un modelo de lenguaje. No modifica los datasets ni participa en la consolidación, y `outputs/` está ignorado por Git. `auth.py` la ejecuta automáticamente al finalizar la ingesta para los símbolos procesados; un fallo de exportación se registra y no invalida la ingesta. La etapa puede omitirse con `--sin-export`.
+
+```text
+data/<symbol>/consolidado/                  outputs/<symbol>/
+dataset_analisis_<tf>.csv  ──► recorte ──►  dataset_analisis_<tf>.csv
+                             (columnas + muestreo híbrido)
+```
+
+**Dos reducciones combinadas:**
+
+1. **Columnas (38 → 17):** preset compacto que elimina columnas constantes, redundantes, casi constantes, lados complementarios de los ratios y los `delta_vol_*` (inválidos tras muestrear). La referencia temporal exportada es `fecha_local`.
+2. **Filas (muestreo híbrido):** se conserva un bloque reciente a resolución nativa y se muestrea el histórico anterior por bucket. La ventana densa de 5m son las últimas **8 horas**; para 15m y 12h el denso ocupa el 60% del presupuesto. El histórico se toma 1 de cada 12 velas en 5m, 1 de cada 4 en 15m y nativo en 12h.
+
+El presupuesto es de 16,000 tokens por archivo (margen 95%, ~3 caracteres/token). Se excluye la vela en formación y se lee solo la cola del CSV (2 MiB por defecto), nunca el archivo completo. Cada corrida escribe `outputs/_resumen.csv` con filas densas, filas muestreadas, bucket, tokens y rango temporal.
+
+| Timeframe | Filas típicas | Cobertura aproximada |
+| --- | ---: | --- |
+| 5m | ~240 | ~6 días (antes ~8 horas) |
+| 15m | ~235 | ~5 días (antes ~25 horas) |
+| 12h | ~265 | ~4 meses |
