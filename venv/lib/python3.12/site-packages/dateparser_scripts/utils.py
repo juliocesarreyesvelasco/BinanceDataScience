@@ -1,0 +1,57 @@
+import shutil
+from pathlib import Path
+from typing import Any
+
+from git import Repo
+
+CLDR_JSON_DIR = (Path(__file__).parent / "../cldr-json").resolve()
+
+
+def get_raw_data() -> None:
+    cldr_version = "44.1.0"
+    url = "https://github.com/unicode-org/cldr-json.git"
+    if CLDR_JSON_DIR.is_dir():
+        shutil.rmtree(CLDR_JSON_DIR)
+
+    print(f"Clonning {url} @ {cldr_version} on {CLDR_JSON_DIR}...")
+    Repo.clone_from(url, CLDR_JSON_DIR, branch=cldr_version, depth=1)
+
+
+def get_dict_difference(
+    parent_dict: dict[str, Any], child_dict: dict[str, Any]
+) -> dict[str, Any]:
+    difference_dict = {}
+    for key, child_value in child_dict.items():
+        parent_value = parent_dict.get(key)
+        child_specific_value = None
+        if not parent_value:
+            child_specific_value = child_value
+        elif isinstance(child_value, list):
+            child_specific_value = sorted(set(child_value) - set(parent_value))
+        elif isinstance(child_value, dict):
+            child_specific_value = get_dict_difference(parent_value, child_value)
+        elif child_value != parent_value:
+            child_specific_value = child_value
+        if child_specific_value:
+            difference_dict[key] = child_specific_value
+    return difference_dict
+
+
+def combine_dicts(
+    primary_dict: dict[str, Any], supplementary_dict: dict[str, Any]
+) -> dict[str, Any]:
+    combined_dict = {}
+    for key, value in primary_dict.items():
+        if key in supplementary_dict:
+            if isinstance(value, list):
+                combined_dict[key] = value + supplementary_dict[key]
+            elif isinstance(value, dict):
+                combined_dict[key] = combine_dicts(value, supplementary_dict[key])
+            else:
+                combined_dict[key] = supplementary_dict[key]
+        else:
+            combined_dict[key] = value
+    remaining_keys = [key for key in supplementary_dict if key not in primary_dict]
+    for key in remaining_keys:
+        combined_dict[key] = supplementary_dict[key]
+    return combined_dict

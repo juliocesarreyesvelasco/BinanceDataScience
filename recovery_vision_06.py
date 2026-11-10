@@ -1,13 +1,4 @@
-"""Descarga manual de Klines históricas desde Binance Vision.
-
-Este script quedó fuera del pipeline diario. Se conserva como herramienta de
-recuperación para reconstruir el histórico de Klines si se pierde el archivo
-crudo de la API REST o si se necesita un respaldo independiente.
-
-Uso:
-    ./binance_env/bin/python binance_vision/backfill_vision.py --years 3
-"""
-
+"""Descarga manual de Klines históricas desde Binance Vision."""
 import argparse
 import io
 import logging
@@ -45,7 +36,11 @@ def descargar_zips_vision(symbol: str, tf: str, start_date: datetime, end_date: 
                 with zipfile.ZipFile(io.BytesIO(res.content)) as z:
                     for filename in z.namelist():
                         with z.open(filename) as f:
-                            df = pd.read_csv(f, header=None)
+                            # OPTIMIZACIÓN: Motor pyarrow para carga masiva y veloz
+                            try:
+                                df = pd.read_csv(f, header=None, engine="pyarrow")
+                            except ImportError:
+                                df = pd.read_csv(f, header=None)
                             dataframes.append(df)
             else:
                 logger.warning(f"[binance_vision] {symbol} {tf}: No disponible {mes_str} (HTTP {res.status_code})")

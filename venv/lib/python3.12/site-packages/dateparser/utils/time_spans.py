@@ -1,0 +1,168 @@
+import re
+import warnings
+from collections.abc import Mapping
+from datetime import datetime, timedelta
+from typing import TYPE_CHECKING, Any
+
+from dateutil.relativedelta import relativedelta
+
+if TYPE_CHECKING:
+    from dateparser.conf import Settings
+
+
+def _get_week_start(date: datetime, start_of_week: str) -> datetime:
+    days_back = date.weekday()
+    if start_of_week != "monday":
+        days_back = (days_back + 1) % 7
+    return date - timedelta(days=days_back)
+
+
+def get_week_start(date: datetime, start_of_week: str = "monday") -> datetime:
+    warnings.warn(
+        "dateparser.utils.time_spans.get_week_start() is deprecated and will "
+        "be removed in a future version.",
+        FutureWarning,
+        stacklevel=2,
+    )
+    return _get_week_start(date, start_of_week)
+
+
+def get_week_end(date: datetime, start_of_week: str = "monday") -> datetime:
+    warnings.warn(
+        "dateparser.utils.time_spans.get_week_end() is deprecated and will "
+        "be removed in a future version.",
+        FutureWarning,
+        stacklevel=2,
+    )
+    return _get_week_start(date, start_of_week) + timedelta(days=6)
+
+
+def detect_time_span(text: str) -> dict[str, Any] | None:
+    """Detect time span expressions in text and return span information."""
+    span_patterns = [
+        {
+            "pattern": r"\b(?:for\s+the\s+|during\s+the\s+|in\s+the\s+)?(?:past|last|previous)\s+month\b",
+            "type": "month",
+            "direction": "past",
+        },
+        {
+            "pattern": r"\b(?:for\s+the\s+|during\s+the\s+|in\s+the\s+)?(?:past|last|previous)\s+week\b",
+            "type": "week",
+            "direction": "past",
+        },
+        {
+            "pattern": r"\b(?:for\s+the\s+|during\s+the\s+|in\s+the\s+)?(?:past|last|previous)\s+(\d+)\s+days?\b",
+            "type": "days",
+            "direction": "past",
+        },
+        {
+            "pattern": r"\b(?:for\s+the\s+|during\s+the\s+|in\s+the\s+)?(?:past|last|previous)\s+(\d+)\s+weeks?\b",
+            "type": "weeks",
+            "direction": "past",
+        },
+        {
+            "pattern": r"\b(?:for\s+the\s+|during\s+the\s+|in\s+the\s+)?(?:past|last|previous)\s+(\d+)\s+months?\b",
+            "type": "months",
+            "direction": "past",
+        },
+        {
+            "pattern": r"\b(?:for\s+the\s+|during\s+the\s+|in\s+the\s+)?(?:next|coming|following)\s+month\b",
+            "type": "month",
+            "direction": "future",
+        },
+        {
+            "pattern": r"\b(?:for\s+the\s+|during\s+the\s+|in\s+the\s+)?(?:next|coming|following)\s+week\b",
+            "type": "week",
+            "direction": "future",
+        },
+        {
+            "pattern": r"\b(?:for\s+the\s+|during\s+the\s+|in\s+the\s+)?(?:next|coming|following)\s+(\d+)\s+days?\b",
+            "type": "days",
+            "direction": "future",
+        },
+        {
+            "pattern": r"\b(?:for\s+the\s+|during\s+the\s+|in\s+the\s+)?(?:next|coming|following)\s+(\d+)\s+weeks?\b",
+            "type": "weeks",
+            "direction": "future",
+        },
+        {
+            "pattern": r"\b(?:for\s+the\s+|during\s+the\s+|in\s+the\s+)?(?:next|coming|following)\s+(\d+)\s+months?\b",
+            "type": "months",
+            "direction": "future",
+        },
+    ]
+
+    for pattern_info in span_patterns:
+        match = re.search(pattern_info["pattern"], text, re.IGNORECASE)
+        if match:
+            result: dict[str, Any] = {
+                "type": pattern_info["type"],
+                "direction": pattern_info["direction"],
+                "matched_text": match.group(0),
+                "start_pos": match.start(),
+                "end_pos": match.end(),
+            }
+
+            if match.groups():
+                try:
+                    result["number"] = int(match.group(1))
+                except ValueError:
+                    # More digits than int() accepts, so not a usable quantity.
+                    continue
+
+            return result
+
+    return None
+
+
+def generate_time_span(
+    span_info: Mapping[str, Any],
+    base_date: datetime | None = None,
+    settings: "Settings | None" = None,
+) -> tuple[datetime, datetime]:
+    """Return the start and end dates of the span described by *span_info*."""
+    if base_date is None:
+        warnings.warn(
+            "Calling dateparser.utils.time_spans.generate_time_span() without "
+            "base_date is deprecated, and base_date will be required in a "
+            "future version.",
+            FutureWarning,
+            stacklevel=2,
+        )
+        base_date = datetime.now()
+    if settings is None:
+        warnings.warn(
+            "Calling dateparser.utils.time_spans.generate_time_span() without "
+            "settings is deprecated, and settings will be required in a "
+            "future version.",
+            FutureWarning,
+            stacklevel=2,
+        )
+        start_of_week, days_in_month = "monday", 30
+    else:
+        start_of_week = getattr(settings, "DEFAULT_START_OF_WEEK", "monday")
+        days_in_month = getattr(settings, "DEFAULT_DAYS_IN_MONTH", 30)
+    span_type = span_info["type"]
+    number = span_info.get("number", 1)
+    past = span_info["direction"] == "past"
+
+    if span_type == "week":
+        week_start = _get_week_start(base_date, start_of_week)
+        if past:
+            return week_start - timedelta(days=7), week_start - timedelta(days=1)
+        start_date = week_start + timedelta(days=7)
+        return start_date, start_date + timedelta(days=6)
+
+    span: timedelta | relativedelta
+    if span_type == "month":
+        span = timedelta(days=days_in_month)
+    elif span_type == "days":
+        span = timedelta(days=number)
+    elif span_type == "weeks":
+        span = timedelta(weeks=number)
+    else:
+        span = relativedelta(months=number)
+
+    if past:
+        return base_date - span, base_date
+    return base_date, base_date + span

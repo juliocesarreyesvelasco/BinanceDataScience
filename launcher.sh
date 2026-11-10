@@ -1,17 +1,41 @@
 #!/usr/bin/env bash
 
-# Directorio base dinámico donde reside el script
-BOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# Rutas absolutas fijas
+BOT_DIR="/home/julioc/Documentos/BinanceDataScience"
 VENV_DIR="$BOT_DIR/venv"
 REQ_FILE="$BOT_DIR/requirements.txt"
 HASH_FILE="$BOT_DIR/logs/.requirements.hash"
+MAIN_SCRIPT="$BOT_DIR/orchestrator_01.py"
 
 mkdir -p "$BOT_DIR/logs"
-# Toda la salida del bash va a launcher.log (stdout y stderr)
 exec >> "$BOT_DIR/logs/launcher.log" 2>&1
 
 echo "================================================="
 echo "[$(date '+%Y-%m-%d %H:%M:%S')] INICIO: systemd timer"
+
+# --- NOTIFICACIÓN VISUAL (Zenity) ---
+# Necesario para que systemd pueda dibujar la ventana en tu entorno XFCE
+export DISPLAY=:0 
+
+if command -v zenity >/dev/null 2>&1; then
+    # zenity --question devuelve: 0 (Aceptar), 1 (Cancelar), 5 (Timeout)
+    zenity --question \
+        --title="Pipeline BinanceDataScience" \
+        --text="El proceso de ingesta automática comenzará en 10 segundos.\n\n¿Deseas iniciarlo ahora mismo o cancelar esta corrida?" \
+        --ok-label="Iniciar Ahora" \
+        --cancel-label="Cancelar" \
+        --timeout=10
+
+    ZEN_STATUS=$?
+
+    if [ $ZEN_STATUS -eq 1 ]; then
+        echo "[CANCELADO] El usuario abortó la ejecución desde la ventana emergente."
+        # Salimos con código 0 para que systemd no registre esto como un error del sistema
+        exit 0
+    fi
+    echo "[PROCESANDO] Ventana aceptada o tiempo de espera concluido."
+fi
+# ------------------------------------
 
 # 1. Preparar entorno virtual
 if [ ! -d "$VENV_DIR" ]; then
@@ -22,7 +46,7 @@ fi
 
 source "$VENV_DIR/bin/activate"
 
-# 2. Instalación de dependencias (solo si requirements.txt cambia)
+# 2. Instalación de dependencias
 if [ -f "$REQ_FILE" ]; then
     CURRENT_HASH=$(md5sum "$REQ_FILE" | awk '{print $1}')
     PREV_HASH=""
@@ -36,15 +60,25 @@ if [ -f "$REQ_FILE" ]; then
     else
         echo "[PIP] Dependencias al día."
     fi
+else
+    echo "[WARN] No se encontró $REQ_FILE. Omitiendo actualización de pip."
 fi
 
-# 3. Validación y Ejecución
-echo "[CHECK] Verificando sintaxis de auth.py..."
-if ! "$VENV_DIR/bin/python3" -m py_compile "$BOT_DIR/auth.py"; then
-    echo "[ERROR] Fallo de sintaxis en auth.py. Abortando ejecución."
+# 3. Validación de sintaxis
+echo "[CHECK] Verificando sintaxis de $(basename "$MAIN_SCRIPT")..."
+if ! "$VENV_DIR/bin/python3" -m py_compile "$MAIN_SCRIPT"; then
+    echo "[ERROR] Fallo de sintaxis en $(basename "$MAIN_SCRIPT"). Abortando ejecución."
     exit 1
 fi
 
+# 4. Ejecución del orquestador
 echo "[RUN] Ejecutando orquestador..."
-"$VENV_DIR/bin/python3" "$BOT_DIR/auth.py"
-echo "[FIN] Proceso terminado."
+"$VENV_DIR/bin/python3" "$MAIN_SCRIPT"
+
+EXIT_CODE=$?
+if [ $EXIT_CODE -eq 0 ]; then
+    echo "[FIN] Proceso terminado con éxito."
+else
+    echo "[ERROR] El orquestador finalizó con código de error $EXIT_CODE."
+    exit $EXIT_CODE
+fi

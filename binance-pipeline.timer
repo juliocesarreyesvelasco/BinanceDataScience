@@ -1,0 +1,10 @@
+[Unit]
+Description=Ejecucion horaria del Pipeline de Binance
+
+[Timer]
+OnCalendar=hourly
+RandomizedDelaySec=20
+Persistent=true
+
+[Install]
+WantedBy=timers.target

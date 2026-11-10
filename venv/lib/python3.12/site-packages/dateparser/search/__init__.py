@@ -1,0 +1,115 @@
+from collections.abc import Callable, Iterable
+from datetime import datetime
+from typing import Any
+
+from dateparser.conf import Settings
+from dateparser.search.search import DateSearchWithDetection
+
+_search_with_detection = DateSearchWithDetection()
+
+
+def search_dates(
+    text: str,
+    languages: Iterable[str] | None = None,
+    settings: Settings | dict[str, Any] | None = None,
+    add_detected_language: bool = False,
+    detect_languages_function: Callable[..., list[str]] | None = None,
+    strategy: str = "split",
+    date_formats: Iterable[str] | None = None,
+    add_period: bool = False,
+) -> (
+    list[tuple[str, datetime]]
+    | list[tuple[str, datetime, str | None]]
+    | list[tuple[str, datetime, str | None, str | None]]
+    | None
+):
+    """Find all substrings of the given string which represent date and/or time and parse them.
+
+    :param text:
+        A string in a natural language which may contain date and/or time expressions.
+    :type text: str
+
+    :param languages:
+        A list of two letters language codes.e.g. ['en', 'es']. If languages are given, it will
+        not attempt to detect the language.
+    :type languages: list
+
+    :param settings:
+        Configure customized behavior using settings defined in :mod:`dateparser.conf.Settings`.
+    :type settings: dict
+
+    :param add_detected_language:
+        Indicates if we want the detected language returned in the tuple.
+    :type add_detected_language: bool
+
+    :param detect_languages_function:
+        A function for language detection that takes as input a `text` and a `confidence_threshold`,
+        and returns a list of detected language codes.
+        Note: detect_languages_function is only uses if `languages` are not provided.
+    :type detect_languages_function: function
+
+    :param strategy:
+        The search strategy to use: "split" (default) translates the text and splits it
+        into chunks that are likely to contain dates, while "ngram" tries to parse the
+        longest possible sequences of tokens as dates. The "ngram" strategy tends to
+        produce more predictable results, at the cost of more parse attempts.
+    :type strategy: str
+
+    :param date_formats:
+        A list of :ref:`format strings <python:strftime-strptime-behavior>`.
+        Text that matches any of them is found before the rest of the text is
+        searched, as long as it does not start or end with whitespace or any of
+        ``,|()@``. Requires ``strategy="ngram"``.
+    :type date_formats: list
+
+    :param add_period:
+        Indicates if we want the period of each date (``time``, ``part_of_day``,
+        ``day``, ``week``, ``month`` or ``year``) returned in the tuple, before the
+        detected language. ``time`` and ``part_of_day`` require the
+        ``RETURN_TIME_AS_PERIOD`` :ref:`setting <settings>`.
+
+        .. versionadded:: 1.5.0
+    :type add_period: bool
+
+    :return: Returns list of tuples containing:
+        substrings representing date and/or time, corresponding :mod:`datetime.datetime`
+        object, period if *add_period* is True and detected language if
+        *add_detected_language* is True.
+        Returns None if no dates that can be parsed are found.
+    :rtype: list
+    :raises: ValueError - Unknown Language
+
+    >>> from dateparser.search import search_dates
+    >>> search_dates('The first artificial Earth satellite was launched on 4 October 1957.')
+    [('on 4 October 1957', datetime.datetime(1957, 10, 4, 0, 0))]
+
+    >>> search_dates('The first artificial Earth satellite was launched on 4 October 1957.',
+    >>>              add_detected_language=True)
+    [('on 4 October 1957', datetime.datetime(1957, 10, 4, 0, 0), 'en')]
+
+    >>> search_dates("The client arrived to the office for the first time in March 3rd, 2004 "
+    >>>              "and got serviced, after a couple of months, on May 6th 2004, the customer "
+    >>>              "returned indicating a defect on the part")
+    [('in March 3rd, 2004 and', datetime.datetime(2004, 3, 3, 0, 0)),
+     ('on May 6th 2004', datetime.datetime(2004, 5, 6, 0, 0))]
+
+    """
+    text = _search_with_detection.preprocess_text(text, languages)
+
+    language, dates = _search_with_detection._search_dates(
+        text=text,
+        languages=languages,
+        settings=settings,
+        detect_languages_function=detect_languages_function,
+        strategy=strategy,
+        date_formats=date_formats,
+    )
+    if not dates:
+        return None
+    if add_period:
+        if add_detected_language:
+            return [(*date, language) for date in dates]
+        return dates
+    if add_detected_language:
+        return [(*date[:2], language) for date in dates]
+    return [date[:2] for date in dates]

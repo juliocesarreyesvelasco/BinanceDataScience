@@ -1,0 +1,345 @@
+import calendar
+import logging
+import logging.config
+import os
+import threading
+import types
+import unicodedata
+import warnings
+from collections import OrderedDict
+from collections.abc import Callable, Mapping
+from datetime import datetime, tzinfo
+from datetime import timezone as dt_timezone
+from typing import TYPE_CHECKING, Any, Literal, TypeVar
+
+import regex as re
+from pytz import UTC, UnknownTimeZoneError, timezone
+from tzlocal import get_localzone
+
+from dateparser.timezone_parser import StaticTzInfo, _find_tz
+
+if TYPE_CHECKING:
+    from dateparser.conf import Settings
+
+_T = TypeVar("_T")
+
+
+def _get_localzone() -> tzinfo:
+    try:
+        return get_localzone()
+    except ValueError as error:
+        warnings.warn(
+            f"Could not determine the local timezone "
+            f"(TZ={os.environ.get('TZ')!r}): {error}. In a future version of "
+            f"dateparser, this will raise RuntimeError instead of failing to "
+            f"parse the date.",
+            FutureWarning,
+            stacklevel=2,
+        )
+        raise
+
+
+def strip_braces(date_string: str) -> str:
+    return re.sub(r"[{}()<>\[\]]+", "", date_string)
+
+
+def normalize_unicode(
+    string: str, form: Literal["NFC", "NFD", "NFKC", "NFKD"] = "NFKD"
+) -> str:
+    return "".join(
+        c
+        for c in unicodedata.normalize(form, string)
+        if unicodedata.category(c) != "Mn"
+    )
+
+
+def combine_dicts(
+    primary_dict: Mapping[str, Any], supplementary_dict: Mapping[str, Any]
+) -> "OrderedDict[str, Any]":
+    combined_dict: OrderedDict[str, Any] = OrderedDict()
+    for key, value in primary_dict.items():
+        if key in supplementary_dict:
+            if isinstance(value, list):
+                combined_dict[key] = value + supplementary_dict[key]
+            elif isinstance(value, dict):
+                combined_dict[key] = combine_dicts(value, supplementary_dict[key])
+            else:
+                combined_dict[key] = supplementary_dict[key]
+        else:
+            combined_dict[key] = value
+    remaining_keys = [key for key in supplementary_dict if key not in primary_dict]
+    for key in remaining_keys:
+        combined_dict[key] = supplementary_dict[key]
+    return combined_dict
+
+
+def find_date_separator(format: str) -> str | None:  # noqa: A002
+    m = re.search(r"(?:(?:%[dbBmaA])(\W))+", format)
+    if m:
+        return m.group(1)
+    return None
+
+
+_PART_DIRECTIVES = {
+    "year": ["%y", "%-y", "%Y"],
+    # %j (day of year) encodes month implicitly: a successful strptime with %j always
+    # populates the month field, so %j should count as providing month information.
+    "month": ["%b", "%B", "%m", "%-m", "%j", "%-j"],
+    "day": ["%d", "%-d", "%j", "%-j"],
+    "time": ["%H", "%-H", "%I", "%-I", "%M", "%-M", "%S", "%-S"],
+}
+
+
+def _get_parts(fmt: str) -> tuple[str, ...]:
+    """Return a tuple with the parts (year, month, day, time) that a date format
+    provides, based on its directives."""
+    complete_week_date = False
+    if "%U" in fmt or "%W" in fmt or "%V" in fmt:
+        # A year, week number and weekday determine the complete date. Consume
+        # %% pairs so literal directive names do not count as date components.
+        directives = set(re.findall(r"%[%UWVwuAaYyG]", fmt))
+        complete_week_date = bool(
+            directives & {"%U", "%W", "%V"}
+            and directives & {"%w", "%u", "%a", "%A"}
+            and directives & {"%Y", "%y", "%G"}
+        )
+    return tuple(
+        part
+        for part, directives in _PART_DIRECTIVES.items()
+        if (complete_week_date and part != "time")
+        or any(directive in fmt for directive in directives)
+    )
+
+
+def _get_missing_parts(fmt: str) -> list[str]:
+    """
+    Return a list containing missing parts (day, month, year)
+    from a date format checking its directives
+    """
+    parts = _get_parts(fmt)
+    return [field for field in ("day", "month", "year") if field not in parts]
+
+
+def get_timezone_from_tz_string(tz_string: str) -> tzinfo:
+    try:
+        return timezone(tz_string)
+    except UnknownTimeZoneError:
+        found = _find_tz(f" {tz_string}")
+        if found:
+            _, name, offset = found
+            return StaticTzInfo(name, offset)
+        raise
+
+
+def localize_timezone(date_time: datetime, tz_string: str) -> datetime:
+    if date_time.tzinfo:
+        return date_time
+
+    tz = get_timezone_from_tz_string(tz_string)
+
+    if hasattr(tz, "localize"):
+        date_time = tz.localize(date_time)
+    else:
+        date_time = date_time.replace(tzinfo=tz)
+
+    return date_time
+
+
+def apply_tzdatabase_timezone(date_time: datetime, pytz_string: str) -> datetime:
+    usr_timezone = timezone(pytz_string)
+
+    if date_time.tzinfo != usr_timezone:
+        date_time = date_time.astimezone(usr_timezone)
+
+    return date_time
+
+
+def apply_dateparser_timezone(
+    utc_datetime: datetime, offset_or_timezone_abb: str
+) -> datetime | None:
+    found = _find_tz(f" {offset_or_timezone_abb}")
+    if found:
+        _, name, offset = found
+        return utc_datetime.astimezone(StaticTzInfo(name, offset))
+    return None
+
+
+def apply_timezone(date_time: datetime, tz_string: str) -> datetime:
+    if not date_time.tzinfo:
+        if hasattr(UTC, "localize"):
+            date_time = UTC.localize(date_time)
+        else:
+            date_time = date_time.replace(tzinfo=UTC)
+
+    new_datetime = apply_dateparser_timezone(date_time, tz_string)
+
+    if not new_datetime:
+        new_datetime = apply_tzdatabase_timezone(date_time, tz_string)
+
+    return new_datetime
+
+
+def _now(settings: "Settings", tz: tzinfo | None = None) -> datetime:
+    """Return the current time as a naive datetime in *tz*, or in the
+    ``TIMEZONE`` setting if *tz* is ``None``."""
+    if tz is not None:
+        return datetime.now(tz).replace(tzinfo=None)
+    if "local" in settings.TIMEZONE.lower():
+        return datetime.now()
+    utc_now = datetime.now(dt_timezone.utc)
+    return apply_timezone(utc_now, settings.TIMEZONE).replace(tzinfo=None)
+
+
+def apply_timezone_from_settings(
+    date_obj: datetime, settings: "Settings | None"
+) -> datetime:
+    tz = _get_localzone()
+    if settings is None:
+        return date_obj
+
+    parsed_tz = date_obj.tzinfo is not None
+    if parsed_tz:
+        if "local" not in settings.TIMEZONE.lower():
+            date_obj = apply_timezone(date_obj, settings.TIMEZONE)
+    elif "local" in settings.TIMEZONE.lower():
+        if hasattr(tz, "localize"):
+            date_obj = tz.localize(date_obj)
+        else:
+            date_obj = date_obj.replace(tzinfo=tz)
+    else:
+        date_obj = localize_timezone(date_obj, settings.TIMEZONE)
+
+    if settings.TO_TIMEZONE:
+        date_obj = apply_timezone(date_obj, settings.TO_TIMEZONE)
+
+    if not settings.RETURN_AS_TIMEZONE_AWARE or (
+        settings.RETURN_AS_TIMEZONE_AWARE == "default" and not parsed_tz
+    ):
+        date_obj = date_obj.replace(tzinfo=None)
+
+    return date_obj
+
+
+def get_last_day_of_month(year: int, month: int) -> int:
+    return calendar.monthrange(year, month)[1]
+
+
+def get_previous_leap_year(year: int) -> int:
+    return _get_leap_year(year, future=False)
+
+
+def get_next_leap_year(year: int) -> int:
+    return _get_leap_year(year, future=True)
+
+
+def _get_leap_year(year: int, future: bool) -> int:
+    """
+    Iterate through previous or next years until it gets a valid leap year
+    This is performed to avoid missing or including centurial leap years
+    """
+    step = 1 if future else -1
+    leap_year = year + step
+    while not calendar.isleap(leap_year):
+        leap_year += step
+    return leap_year
+
+
+def set_correct_day_from_settings(
+    date_obj: datetime, settings: "Settings", current_day: int | None = None
+) -> datetime:
+    """Set correct day attending the `PREFER_DAY_OF_MONTH` setting."""
+    options = {
+        "first": 1,
+        "last": get_last_day_of_month(date_obj.year, date_obj.month),
+        "current": current_day or datetime.now().day,
+    }
+
+    try:
+        return date_obj.replace(day=options[settings.PREFER_DAY_OF_MONTH])
+    except ValueError:
+        return date_obj.replace(day=options["last"])
+
+
+def set_correct_month_from_settings(
+    date_obj: datetime, settings: "Settings", current_month: int | None = None
+) -> datetime:
+    """Set correct month attending the `PREFER_MONTH_OF_YEAR` setting."""
+    options = {"first": 1, "last": 12, "current": current_month or datetime.now().month}
+
+    try:
+        return date_obj.replace(month=options[settings.PREFER_MONTH_OF_YEAR])
+    except ValueError:
+        return date_obj.replace(month=options["last"])
+
+
+_registry_lock = threading.Lock()
+
+
+def registry(cls: type[_T]) -> type[_T]:
+    warnings.warn(
+        "dateparser.utils.registry() is deprecated and will be removed in a "
+        "future version.",
+        FutureWarning,
+        stacklevel=2,
+    )
+
+    def choose(creator: Callable[..., Any]) -> "staticmethod[..., Any]":
+        def constructor(cls: Any, *args: Any, **kwargs: Any) -> Any:
+            key = cls.get_key(*args, **kwargs)
+
+            with _registry_lock:
+                if not hasattr(cls, "__registry_dict"):
+                    setattr(cls, "__registry_dict", {})
+                registry_dict = getattr(cls, "__registry_dict")
+
+                if key not in registry_dict:
+                    instance = creator(cls, *args)
+                    # Set the key before publishing the instance so other
+                    # threads never observe an entry without ``registry_key``.
+                    instance.registry_key = key
+                    registry_dict[key] = instance
+                return registry_dict[key]
+
+        return staticmethod(constructor)
+
+    get_key = getattr(cls, "get_key", None)
+    if not (isinstance(get_key, types.MethodType) and get_key.__self__ is cls):
+        raise NotImplementedError(
+            "Registry classes require to implement class method get_key"
+        )
+
+    cls.__new__ = choose(cls.__new__)  # type: ignore[method-assign]
+    return cls
+
+
+def get_logger() -> logging.Logger:
+    setup_logging()
+    return logging.getLogger("dateparser")
+
+
+def setup_logging() -> None:
+    if len(logging.root.handlers):
+        return
+
+    config = {
+        "version": 1,
+        "disable_existing_loggers": True,
+        "formatters": {
+            "console": {
+                "format": "%(asctime)s %(levelname)s: [%(name)s] %(message)s",
+            },
+        },
+        "handlers": {
+            "console": {
+                "level": logging.DEBUG,
+                "class": "logging.StreamHandler",
+                "formatter": "console",
+                "stream": "ext://sys.stdout",
+            },
+        },
+        "root": {
+            "level": logging.DEBUG,
+            "handlers": ["console"],
+        },
+    }
+    logging.config.dictConfig(config)

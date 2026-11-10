@@ -1,0 +1,18 @@
+[Unit]
+Description=Pipeline de Ingesta BinanceDataScience
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=julioc
+WorkingDirectory=/home/julioc/Documentos/BinanceDataScience
+ExecStart=/home/julioc/Documentos/BinanceDataScience/launcher.sh
+
+# Asegurar que el entorno sea correcto
+Environment="PATH=/home/julioc/Documentos/BinanceDataScience/venv/bin:/usr/local/bin:/usr/bin:/bin"
+
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

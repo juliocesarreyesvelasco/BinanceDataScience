@@ -1,7 +1,6 @@
 import time
 import requests
 
-
 def obtener_klines_api(client, symbol: str, tf: str, start_ms: int, end_ms: int, logger) -> list:
     try:
         klines = client.futures_historical_klines(
@@ -27,7 +26,6 @@ def obtener_klines_api(client, symbol: str, tf: str, start_ms: int, end_ms: int,
         logger.error(f"[api_rest_klines_{tf}] Error: {e}")
         return []
 
-
 def obtener_funding_rates(client, symbol: str, start_ms: int, end_ms: int, logger) -> list:
     try:
         data = client.futures_funding_rate(symbol=symbol, startTime=start_ms, endTime=end_ms, limit=1000)
@@ -35,7 +33,6 @@ def obtener_funding_rates(client, symbol: str, start_ms: int, end_ms: int, logge
     except Exception as e:
         logger.error(f"[api_rest_funding] Error: {e}")
         return []
-
 
 def _get_sentimiento_con_reintentos(session: requests.Session, url: str, params: dict, headers: dict, logger, max_intentos: int = 3):
     espera = 1
@@ -60,7 +57,6 @@ def _get_sentimiento_con_reintentos(session: requests.Session, url: str, params:
                 time.sleep(espera)
                 espera *= 2
     return None, max_intentos
-
 
 def obtener_metricas_sentimiento(session: requests.Session, api_key: str, symbol: str, tf: str, start_ms: int, end_ms: int, logger):
     metricas = {

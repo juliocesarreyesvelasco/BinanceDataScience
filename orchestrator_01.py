@@ -2,6 +2,7 @@ import argparse
 import logging
 import os
 import time
+import gc
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -13,15 +14,13 @@ import data_consolidator_03 as consolidator
 import export_outputs_05 as export_outputs
 import fetcher_02 as fetcher
 
-# Carga las variables definidas en el archivo .env al entorno del sistema
 load_dotenv()
 
-# --- PARÁMETROS GLOBALES ---
 API_KEY = os.getenv("BINANCE_API_KEY")
 API_SECRET = os.getenv("BINANCE_API_SECRET")
 
 if not API_KEY or not API_SECRET:
-    raise ValueError("Error: Faltan las credenciales BINANCE_API_KEY o BINANCE_API_SECRET en el archivo .env")
+    raise ValueError("Error: Faltan credenciales BINANCE_API_KEY o BINANCE_API_SECRET en .env")
 
 PARES = ["BNBUSDT", "ETHUSDT", "XRPUSDT", "SOLUSDT", "BTCUSDT"]
 TIMEFRAMES = ["5m", "15m", "12h"]
@@ -121,18 +120,13 @@ def _planificar_rangos_sentimiento(symbol: str, tf: str, df_master, ahora_utc: d
 
     ultimo = int(df_master["timestamp"].max())
     if ultimo < piso:
-        logger.warning(
-            f"[{symbol.upper()}] {tf}: maestro de sentimiento desactualizado "
-            f"(último {ultimo} < piso {piso}); posible pérdida por retención de {RETENCION_DIAS_SENTIMIENTO} días."
-        )
+        logger.warning(f"[{symbol.upper()}] {tf}: maestro desactualizado (último {ultimo} < piso {piso}).")
 
     if _requiere_reconciliacion(df_master, inicio_dia_ms):
         return [(piso, ahora_ms)], True
 
     rangos = [(max(ultimo - solape, piso), ahora_ms)]
-    for inicio_hueco, fin_hueco in consolidator.detectar_huecos_timestamps(
-        df_master, tf, desde_ms=piso, hasta_ms=ahora_ms
-    ):
+    for inicio_hueco, fin_hueco in consolidator.detectar_huecos_timestamps(df_master, tf, desde_ms=piso, hasta_ms=ahora_ms):
         if fin_hueco - inicio_hueco > 2 * intervalo:
             rangos.append((inicio_hueco, fin_hueco))
 
@@ -175,7 +169,6 @@ def main(symbols=None, data_dir=None, exportar=True):
 
     simbolos_procesados = []
     
-    # Abrimos la sesión HTTP que se mantendrá viva toda la corrida
     with requests.Session() as session:
         for symbol in symbols:
             symbol_dir = base_data / symbol.lower()
@@ -237,23 +230,27 @@ def main(symbols=None, data_dir=None, exportar=True):
                 df_sent, stats_sent = consolidator.actualizar_master_sentimiento(
                     symbol, tf, metricas, out_dir, logger, fecha_procesamiento, df_old=df_sent_old
                 )
+                
                 logger.info(
                     f"[sentimiento] {symbol} {tf}: modo={'recuperacion' if recuperacion_sent else 'incremental'} "
-                    f"rangos={rangos_sent} peticiones={peticiones_sent} "
-                    f"nuevos={stats_sent['nuevos_reales']} actualizados={stats_sent['actualizados']} "
-                    f"escritura={'si' if stats_sent['written'] else 'no'}"
+                    f"peticiones={peticiones_sent} nuevos={stats_sent['nuevos_reales']} actualizados={stats_sent['actualizados']}"
                 )
 
                 df_dataset = consolidator.construir_dataset(symbol, df_klines, df_sent, df_fund, fecha_procesamiento)
-                if df_dataset.empty:
-                    logger.warning(f"[{symbol.upper()}] {tf}: sin datos para construir el dataset. Se omite escritura.")
-                    continue
+                if not df_dataset.empty:
+                    consolidator.guardar_dataset(df_dataset, out_dir, tf)
+                    consolidator.auditar_dataset(logger, symbol, tf, filas_previas, filas_nuevas, df_dataset)
 
-                consolidator.guardar_dataset(df_dataset, out_dir, tf)
-                consolidator.auditar_dataset(logger, symbol, tf, filas_previas, filas_nuevas, df_dataset)
+                # OPTIMIZACIÓN: Liberación forzada de RAM por cada iteración del bucle
+                del df_old, df_nuevos, df_klines, df_sent_old, df_sent, df_dataset
+                gc.collect()
 
             if symbol not in simbolos_procesados:
                 simbolos_procesados.append(symbol)
+                
+            # Liberar dataframe de funding del símbolo
+            del df_fund_old, df_fund
+            gc.collect()
 
     if exportar and simbolos_procesados:
         try:
@@ -264,24 +261,16 @@ def main(symbols=None, data_dir=None, exportar=True):
                 timeframes=TIMEFRAMES,
                 ahora_ms=int(datetime.now(timezone.utc).timestamp() * 1000),
             )
-            logger.info(
-                f"Exportación para análisis con IA: {len(resumen)} archivos generados en {BASE_DIR / 'outputs'}"
-            )
+            logger.info(f"Exportación para IA: {len(resumen)} archivos en {BASE_DIR / 'outputs'}")
         except Exception:
-            logger.exception("La exportación para análisis con IA falló; la ingesta se conserva.")
+            logger.exception("La exportación para IA falló; la ingesta se conserva.")
 
-    logger.info("=== FLUJO DE EJECUCIÓN COMPLETADO ===")
-
+    logger.info("=== FLUJO COMPLETADO ===")
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Orquestador de ingesta Binance dataset-only")
-    parser.add_argument("--symbols", nargs="+", default=None, help="Símbolos a procesar (default: todos)")
-    parser.add_argument("--data-dir", type=Path, default=None, help="Directorio de datos alternativo")
-    parser.add_argument(
-        "--sin-export",
-        dest="exportar",
-        action="store_false",
-        help="No regenerar outputs/ para análisis con IA al finalizar la ingesta",
-    )
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--symbols", nargs="+", default=None)
+    parser.add_argument("--data-dir", type=Path, default=None)
+    parser.add_argument("--sin-export", dest="exportar", action="store_false")
     args = parser.parse_args()
     main(args.symbols, args.data_dir, args.exportar)
