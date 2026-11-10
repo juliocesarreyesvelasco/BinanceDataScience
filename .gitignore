@@ -3,11 +3,24 @@
 *.env
 
 # Entornos virtuales
+venv/
+.venv/
 binance_env/
+env/
 
 # Temporales y caché de Python
 __pycache__/
 *.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Editores y sistema
+.vscode/
+.idea/
+.DS_Store
+*.tmp
 
 # Datos y logs generados por el pipeline
 data/

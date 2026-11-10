@@ -8,6 +8,6 @@
    - NUNCA intentes leer, cargar o procesar archivos completos dentro de `data/`
    - Si necesitas conocer la estructura de los datos, pide al usuario un esquema o lee únicamente las primeras 3 líneas de muestra.
 4. Entorno de ejecución:
-   - Todo comando de Python debe ejecutarse bajo el entorno virtual `binance_env`.
+   - Todo comando de Python debe ejecutarse bajo el entorno virtual `venv`.
    - No instales paquetes nuevos sin consultar primero.
 5. Al finalizar tus cambios y una vez aprobados y revisados por mi, genera una bitacora tecnica con todas las desiciones de arquitecturas tomadas y una cronologia de las acciones hechas, pruebas, ejecuciones y errores durante el proceso actual. Bitacora_Refactor_YYYY-MM-DD.md Luego incluye ese archivo en los archivos .gitignore y .ignore para que ese archivo no forme parte de tu ventana de contexto en la siguiente ejecucion.
