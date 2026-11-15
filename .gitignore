@@ -26,4 +26,7 @@ __pycache__/
 data/
 logs/
 outputs/
-refactorizaciones/
+linux_services/
+
+# Datos y logs generados por el pipeline
+.git/

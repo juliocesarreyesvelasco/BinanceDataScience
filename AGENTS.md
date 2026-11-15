@@ -10,4 +10,4 @@
 4. Entorno de ejecución:
    - Todo comando de Python debe ejecutarse bajo el entorno virtual `venv`.
    - No instales paquetes nuevos sin consultar primero.
-5. Al finalizar tus cambios y una vez aprobados y revisados por mi, genera una bitacora tecnica con todas las desiciones de arquitecturas tomadas y una cronologia de las acciones hechas, pruebas, ejecuciones y errores durante el proceso actual. Bitacora_Refactor_YYYY-MM-DD.md Luego incluye ese archivo en los archivos .gitignore y .ignore para que ese archivo no forme parte de tu ventana de contexto en la siguiente ejecucion.
+5. El archivo .gitignore contiene los archivos y carpetas que debes omitir de leer y procesar, valida en cada nueva modificacion tipo BUILD si este archivo necesita ser actualizado
